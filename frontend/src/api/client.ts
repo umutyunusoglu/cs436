@@ -1,0 +1,35 @@
+import axios from 'axios';
+import type { Metal, MetalName, PricesResponse, Prediction, RangeOption, TechnicalResponse } from '../types';
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? '';
+
+const api = axios.create({
+  baseURL: BASE_URL,
+  timeout: 15_000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+function toMetalParam(metal: Metal): MetalName {
+  return metal === 'XAU' ? 'gold' : 'silver';
+}
+
+export async function fetchPrices(metal: Metal, range: RangeOption): Promise<PricesResponse> {
+  const { data } = await api.get<PricesResponse>('/prices', {
+    params: { metal: toMetalParam(metal), range },
+  });
+  return data;
+}
+
+export async function fetchPrediction(metal: Metal): Promise<Prediction> {
+  const { data } = await api.get<Prediction>('/predict', {
+    params: { metal: toMetalParam(metal) },
+  });
+  return data;
+}
+
+export async function fetchTechnical(metal: Metal): Promise<TechnicalResponse> {
+  const { data } = await api.get<TechnicalResponse>('/technical', {
+    params: { metal: toMetalParam(metal) },
+  });
+  return data;
+}

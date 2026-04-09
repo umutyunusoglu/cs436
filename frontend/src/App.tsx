@@ -1,0 +1,123 @@
+import { useState, useCallback } from 'react';
+import type { Metal, RangeOption, OHLCBar } from './types';
+import { MetalSelector } from './components/MetalSelector';
+import { PriceHeader } from './components/PriceHeader';
+import { PriceChart } from './components/PriceChart';
+import { RSIChart, MACDChart } from './components/TechnicalIndicators';
+import { PredictionBadge } from './components/PredictionBadge';
+import { usePrices } from './hooks/usePrices';
+import { usePrediction } from './hooks/usePrediction';
+import { useWebSocket } from './hooks/useWebSocket';
+import { fetchTechnical } from './api/client';
+import { useEffect, useRef } from 'react';
+import type { RSIPoint, MACDPoint } from './types';
+
+export default function App() {
+  const [metal, setMetal] = useState<Metal>('XAU');
+  const [range, setRange] = useState<RangeOption>('7d');
+  const [rsiData, setRsiData] = useState<RSIPoint[]>([]);
+  const [macdData, setMacdData] = useState<MACDPoint[]>([]);
+  const [liveBars, setLiveBars] = useState<OHLCBar[]>([]);
+
+  const { data: priceData, loading, error, lastUpdated } = usePrices(metal, range);
+  const { prediction, loading: predLoading, error: predError } = usePrediction(metal);
+
+  // Merge historical + live bars
+  const allBars = liveBars.length > 0
+    ? [...priceData, ...liveBars].reduce<OHLCBar[]>((acc, bar) => {
+        const last = acc[acc.length - 1];
+        if (last && last.timestamp === bar.timestamp) {
+          acc[acc.length - 1] = bar; // Update existing bucket
+        } else {
+          acc.push(bar);
+        }
+        return acc;
+      }, [])
+    : priceData;
+
+  const handleLiveUpdate = useCallback(
+    (bar: { open: number; high: number; low: number; close: number; timestamp: string }) => {
+      setLiveBars((prev) => {
+        const next = [...prev];
+        const idx = next.findIndex((b) => b.timestamp === bar.timestamp);
+        const ohlcBar: OHLCBar = { ...bar, volume: 0 };
+        if (idx >= 0) {
+          next[idx] = ohlcBar;
+        } else {
+          next.push(ohlcBar);
+        }
+        return next.slice(-10); // Keep only last 10 live bars to limit memory
+      });
+    },
+    [],
+  );
+
+  useWebSocket(metal, handleLiveUpdate);
+
+  // Fetch technical data when metal changes
+  useEffect(() => {
+    let cancelled = false;
+    fetchTechnical(metal)
+      .then((resp) => {
+        if (!cancelled) {
+          setRsiData(resp.rsi);
+          setMacdData(resp.macd);
+        }
+      })
+      .catch(() => {/* silently ignore */});
+    return () => { cancelled = true; };
+  }, [metal]);
+
+  // Reset live bars when metal or range changes
+  useEffect(() => { setLiveBars([]); }, [metal, range]);
+
+  return (
+    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '24px 16px' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#e2e8f0' }}>
+          Precious Metals Tracker
+        </h1>
+        <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+          Real-time XAU/XAG price charts · RSI · MACD · ML predictions
+        </p>
+      </div>
+
+      {/* Controls */}
+      <div style={{ marginBottom: '20px' }}>
+        <MetalSelector
+          metal={metal}
+          range={range}
+          onMetalChange={setMetal}
+          onRangeChange={setRange}
+        />
+      </div>
+
+      {/* Price header + prediction badge */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+        <PriceHeader metal={metal} data={allBars} loading={loading} lastUpdated={lastUpdated} />
+        <PredictionBadge prediction={prediction} loading={predLoading} error={predError} />
+      </div>
+
+      {/* Error state */}
+      {error && (
+        <div style={{ padding: '12px 16px', background: '#ef444418', border: '1px solid #ef444440', borderRadius: '8px', color: '#ef4444', marginBottom: '16px', fontSize: '14px' }}>
+          {error}
+        </div>
+      )}
+
+      {/* Candlestick chart */}
+      <div style={{ marginBottom: '16px' }}>
+        <PriceChart data={allBars} metal={metal} height={380} />
+      </div>
+
+      {/* Technical indicators */}
+      {rsiData.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <RSIChart data={rsiData} />
+          <MACDChart data={macdData} />
+        </div>
+      )}
+    </div>
+  );
+}
