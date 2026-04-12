@@ -8,6 +8,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as path from 'path';
 import { PythonFunction } from '@aws-cdk/aws-lambda-python-alpha';
 import { StorageStack } from './storage-stack';
+import { ApiStack } from './api-stack';
 import {
   COMMON_TAGS,
   ENV_DB_SECRET_ARN,
@@ -19,8 +20,10 @@ import {
   RDS_PORT,
 } from './shared/constants';
 
+// Updated the interface
 interface IngestionStackProps extends cdk.StackProps {
   storage: StorageStack;
+  api: ApiStack; // new
 }
 
 export class IngestionStack extends cdk.Stack {
@@ -28,30 +31,24 @@ export class IngestionStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: IngestionStackProps) {
     super(scope, id, props);
-
     Object.entries(COMMON_TAGS).forEach(([k, v]) => cdk.Tags.of(this).add(k, v));
 
-    const { storage } = props;
+    const { storage, api } = props; // <-- Destructure api
 
-    // ── Lambda: price-fetcher ─────────────────────────────────────────────────
     this.priceFetcherFn = new PythonFunction(this, 'PriceFetcherFn', {
       functionName: 'price-fetcher',
-      entry: path.join(__dirname, '../../lambdas/price-fetcher'),
-      runtime: lambda.Runtime.PYTHON_3_12,
-      index: 'handler.py',
-      handler: 'lambda_handler',
-      memorySize: 128,
-      timeout: cdk.Duration.seconds(30),
+      // ... keep existing paths/runtime configurations ...
       vpc: storage.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [storage.lambdaSecurityGroup],
-      allowPublicSubnet: true, // needed because no NAT Gateway
+      allowPublicSubnet: true,
       environment: {
         [ENV_DB_SECRET_ARN]: storage.dbSecret.secretArn,
         [ENV_API_SECRET_ARN]: storage.apiKeySecret.secretArn,
         [ENV_DB_HOST]: storage.dbInstance.dbInstanceEndpointAddress,
         [ENV_DB_NAME]: RDS_DB_NAME,
         [ENV_DB_PORT]: String(RDS_PORT),
+        [ENV_WS_ENDPOINT]: api.wsApiUrl, // <-- Inject the real WebSocket URL
       },
     });
 

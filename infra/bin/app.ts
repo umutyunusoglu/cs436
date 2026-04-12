@@ -18,24 +18,25 @@ const env: cdk.Environment = {
 // Layer 1: Storage (VPC, RDS, S3, Secrets) — must deploy first
 const storage = new StorageStack(app, 'StorageStack', { env });
 
-// Layer 2: Data Ingestion (price-fetcher + EventBridge scheduler)
-const ingestion = new IngestionStack(app, 'IngestionStack', { env, storage });
-ingestion.addDependency(storage);
-
-// Layer 3: ML Pipeline (model-trainer + model-invoker)
+// Layer 2: ML Pipeline (model-trainer + model-invoker)
 const ml = new MlStack(app, 'MlStack', { env, storage });
 ml.addDependency(storage);
 
-// Layer 4: API (api-handler + API Gateway REST + WebSocket + ALB)
+// Layer 3: API (api-handler + API Gateway REST + WebSocket)
+// Moved UP: Must deploy before Ingestion so WS URL is available
 const api = new ApiStack(app, 'ApiStack', { env, storage, ml });
 api.addDependency(storage);
 api.addDependency(ml);
 
+// Layer 4: Data Ingestion (price-fetcher + EventBridge scheduler)
+// Moved DOWN: Now depends on ApiStack
+const ingestion = new IngestionStack(app, 'IngestionStack', { env, storage, api });
+ingestion.addDependency(storage);
+ingestion.addDependency(api);
+
 // Layer 5: Frontend (CloudFront + S3 deployment)
-// Depends on ApiStack to wire ALB and WebSocket origins into CloudFront.
-const frontend = new FrontendStack(app, 'FrontendStack', { env, storage, api });
+const frontend = new FrontendStack(app, 'FrontendStack', { env, storage });
 frontend.addDependency(storage);
-frontend.addDependency(api);
 
 // Layer 6: Monitoring (CloudWatch dashboard + alarms)
 const monitoring = new MonitoringStack(app, 'MonitoringStack', { env, storage, api });

@@ -8,6 +8,8 @@ import { StorageStack } from './storage-stack';
 import { ApiStack } from './api-stack';
 import { COMMON_TAGS } from './shared/constants';
 
+import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+
 interface MonitoringStackProps extends cdk.StackProps {
   storage: StorageStack;
   api: ApiStack;
@@ -24,6 +26,9 @@ export class MonitoringStack extends cdk.Stack {
       topicName: 'price-tracker-alarms',
       displayName: 'Price Tracker Alarms',
     });
+
+    alarmTopic.addSubscription(new snsSubscriptions.EmailSubscription('your.email@example.com'));
+    
 
     // ── Helper: Lambda error rate alarm ──────────────────────────────────────
     const lambdaErrorAlarm = (fnName: string, threshold = 5) =>

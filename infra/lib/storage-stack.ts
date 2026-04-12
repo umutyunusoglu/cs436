@@ -58,11 +58,6 @@ export class StorageStack extends cdk.Stack {
       ],
     });
 
-    // VPC endpoint for Secrets Manager so Lambdas can reach it within the VPC
-    this.vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {
-      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
-    });
-
     // S3 Gateway endpoint — free, lets private-subnet Lambdas reach S3
     // without a NAT Gateway or internet route
     this.vpc.addGatewayEndpoint('S3Endpoint', {

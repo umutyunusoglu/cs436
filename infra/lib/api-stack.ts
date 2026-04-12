@@ -3,8 +3,6 @@ import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigwv2integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
-import * as elbv2targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as path from 'path';
@@ -23,14 +21,18 @@ import {
   RDS_PORT,
 } from './shared/constants';
 
+import * as apigw from 'aws-cdk-lib/aws-apigateway';
+
+
 interface ApiStackProps extends cdk.StackProps {
   storage: StorageStack;
   ml: MlStack;
 }
 
 export class ApiStack extends cdk.Stack {
-  /** Internet-facing ALB — the sole public HTTP entry point for the backend. */
-  public readonly alb: elbv2.ApplicationLoadBalancer;
+  /** REMOVED Internet-facing ALB — the sole public HTTP entry point for the backend. */
+  // Added REST API URL instead
+  public readonly restApiUrl: string;
   /**
    * Hostname of the WebSocket API execute endpoint, e.g.
    * `abc123.execute-api.us-east-1.amazonaws.com`.
@@ -66,8 +68,7 @@ export class ApiStack extends cdk.Stack {
         [ENV_DB_HOST]: storage.dbInstance.dbInstanceEndpointAddress,
         [ENV_DB_NAME]: RDS_DB_NAME,
         [ENV_DB_PORT]: String(RDS_PORT),
-        [ENV_MODEL_INVOKER_ARN]: ml.modelInvokerFn.functionArn,
-        [ENV_WS_ENDPOINT]: '', // Filled after WebSocket API is created
+        [ENV_MODEL_INVOKER_ARN]: ml.modelInvokerFn.functionArn
       },
     });
 
@@ -113,37 +114,32 @@ export class ApiStack extends cdk.Stack {
       ],
     }));
 
-    // Inject the real WS callback URL now that the stage exists
-    const cfnLambda = apiHandlerFn.node.defaultChild as lambda.CfnFunction;
-    cfnLambda.addPropertyOverride('Environment.Variables.WS_ENDPOINT', wsStage.callbackUrl);
-
-    // ── Application Load Balancer ─────────────────────────────────────────────
-    // The only public-facing HTTP endpoint. Browsers reach it exclusively
-    // through CloudFront (/api/*); the ALB is not meant to be called directly.
-    this.alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
-      vpc: storage.vpc,
-      internetFacing: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+    // ── REST API Gateway ──────────────────────────────────────────────────────
+    const restApi = new apigw.LambdaRestApi(this, 'RestApi', {
+      restApiName: 'price-tracker-api',
+      handler: apiHandlerFn,
+      proxy: false,
+      defaultCorsPreflightOptions: {
+        allowOrigins: apigw.Cors.ALL_ORIGINS,
+        allowMethods: apigw.Cors.ALL_METHODS,
+        allowHeaders: ['Content-Type', 'Authorization'],
+      },
     });
 
-    const listener = this.alb.addListener('HttpListener', {
-      port: 80,
-      open: true,
-    });
+    restApi.root.addResource('prices').addMethod('GET');
+    restApi.root.addResource('predict').addMethod('GET');
+    restApi.root.addResource('technical').addMethod('GET');
 
-    listener.addTargets('ApiHandlerTarget', {
-      targets: [new elbv2targets.LambdaTarget(apiHandlerFn)],
-      healthCheck: { enabled: false },
-    });
+    this.restApiUrl = restApi.url;
 
     // ── Exported values ───────────────────────────────────────────────────────
     // Used by FrontendStack to build CloudFront origins.
     this.wsApiExecuteUrl =
       `${wsApi.apiId}.execute-api.${this.region}.amazonaws.com`;
 
-    new cdk.CfnOutput(this, 'AlbDnsName', {
-      value: this.alb.loadBalancerDnsName,
-      exportName: 'AlbDnsName',
+    new cdk.CfnOutput(this, 'RestApiUrl', {
+      value: restApi.url,
+      exportName: 'RestApiUrl',
     });
     new cdk.CfnOutput(this, 'WsApiUrl', {
       value: wsStage.url,
