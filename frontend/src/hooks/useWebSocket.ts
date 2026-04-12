@@ -1,22 +1,40 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import type { LivePriceUpdate, Metal } from '../types';
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? '';
 const RECONNECT_DELAY_MS = 5_000;
+
+/**
+ * Derives the WebSocket URL from the current page origin so it always
+ * routes through CloudFront (/ws) regardless of environment.
+ *   https://d1234.cloudfront.net  →  wss://d1234.cloudfront.net/ws
+ *   http://localhost:3000          →  ws://localhost:3000/ws
+ */
+function getWsUrl(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
+export type WsStatus = 'connecting' | 'connected' | 'disconnected';
 
 export function useWebSocket(
   metal: Metal,
   onUpdate: (bar: NonNullable<LivePriceUpdate['XAU']> & { timestamp: string }) => void,
-) {
+): { status: WsStatus } {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmounted = useRef(false);
+  const [status, setStatus] = useState<WsStatus>('connecting');
 
   const connect = useCallback(() => {
-    if (!WS_URL || unmounted.current) return;
+    if (unmounted.current) return;
 
-    const ws = new WebSocket(WS_URL);
+    setStatus('connecting');
+    const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (!unmounted.current) setStatus('connected');
+    };
 
     ws.onmessage = (evt) => {
       try {
@@ -33,6 +51,7 @@ export function useWebSocket(
 
     ws.onclose = () => {
       if (!unmounted.current) {
+        setStatus('disconnected');
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
       }
     };
@@ -50,4 +69,6 @@ export function useWebSocket(
       wsRef.current?.close();
     };
   }, [connect]);
+
+  return { status };
 }

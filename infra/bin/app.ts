@@ -32,8 +32,10 @@ api.addDependency(storage);
 api.addDependency(ml);
 
 // Layer 5: Frontend (CloudFront + S3 deployment)
-const frontend = new FrontendStack(app, 'FrontendStack', { env, storage });
+// Depends on ApiStack to wire ALB and WebSocket origins into CloudFront.
+const frontend = new FrontendStack(app, 'FrontendStack', { env, storage, api });
 frontend.addDependency(storage);
+frontend.addDependency(api);
 
 // Layer 6: Monitoring (CloudWatch dashboard + alarms)
 const monitoring = new MonitoringStack(app, 'MonitoringStack', { env, storage, api });

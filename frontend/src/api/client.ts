@@ -1,7 +1,9 @@
 import axios from 'axios';
 import type { Metal, MetalName, PricesResponse, Prediction, RangeOption, TechnicalResponse } from '../types';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? '';
+// All API calls go through CloudFront (/api/*) on the same origin as the SPA.
+// No env var needed — the path is relative, which also eliminates CORS entirely.
+const BASE_URL = '/api';
 
 const api = axios.create({
   baseURL: BASE_URL,

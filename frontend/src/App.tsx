@@ -8,9 +8,36 @@ import { PredictionBadge } from './components/PredictionBadge';
 import { usePrices } from './hooks/usePrices';
 import { usePrediction } from './hooks/usePrediction';
 import { useWebSocket } from './hooks/useWebSocket';
+import type { WsStatus } from './hooks/useWebSocket';
 import { fetchTechnical } from './api/client';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import type { RSIPoint, MACDPoint } from './types';
+
+// ── WebSocket status indicator ────────────────────────────────────────────────
+const WS_STATUS_CONFIG: Record<WsStatus, { color: string; label: string }> = {
+  connected:    { color: '#22c55e', label: 'Live' },
+  connecting:   { color: '#f59e0b', label: 'Connecting…' },
+  disconnected: { color: '#ef4444', label: 'Reconnecting…' },
+};
+
+function WsStatusBadge({ status }: { status: WsStatus }) {
+  const { color, label } = WS_STATUS_CONFIG[status];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#94a3b8' }}>
+      <span
+        style={{
+          display: 'inline-block',
+          width: '8px',
+          height: '8px',
+          borderRadius: '50%',
+          background: color,
+          boxShadow: status === 'connected' ? `0 0 6px ${color}` : 'none',
+        }}
+      />
+      {label}
+    </div>
+  );
+}
 
 export default function App() {
   const [metal, setMetal] = useState<Metal>('XAU');
@@ -22,12 +49,12 @@ export default function App() {
   const { data: priceData, loading, error, lastUpdated } = usePrices(metal, range);
   const { prediction, loading: predLoading, error: predError } = usePrediction(metal);
 
-  // Merge historical + live bars
+  // Merge historical + live bars, deduplicating by timestamp bucket
   const allBars = liveBars.length > 0
     ? [...priceData, ...liveBars].reduce<OHLCBar[]>((acc, bar) => {
         const last = acc[acc.length - 1];
         if (last && last.timestamp === bar.timestamp) {
-          acc[acc.length - 1] = bar; // Update existing bucket
+          acc[acc.length - 1] = bar; // update existing 5-min bucket in place
         } else {
           acc.push(bar);
         }
@@ -46,15 +73,15 @@ export default function App() {
         } else {
           next.push(ohlcBar);
         }
-        return next.slice(-10); // Keep only last 10 live bars to limit memory
+        return next.slice(-10); // keep only last 10 live bars
       });
     },
     [],
   );
 
-  useWebSocket(metal, handleLiveUpdate);
+  const { status: wsStatus } = useWebSocket(metal, handleLiveUpdate);
 
-  // Fetch technical data when metal changes
+  // Fetch technical indicators when metal changes
   useEffect(() => {
     let cancelled = false;
     fetchTechnical(metal)
@@ -73,17 +100,21 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '24px 16px' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#e2e8f0' }}>
-          Precious Metals Tracker
-        </h1>
-        <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-          Real-time XAU/XAG price charts · RSI · MACD · ML predictions
-        </p>
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+        <div>
+          <h1 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: 700, color: '#e2e8f0' }}>
+            Precious Metals Tracker
+          </h1>
+          <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+            Real-time XAU/XAG price charts · RSI · MACD · ML predictions
+          </p>
+        </div>
+        <WsStatusBadge status={wsStatus} />
       </div>
 
-      {/* Controls */}
+      {/* ── Controls ─────────────────────────────────────────────────────────── */}
       <div style={{ marginBottom: '20px' }}>
         <MetalSelector
           metal={metal}
@@ -93,25 +124,40 @@ export default function App() {
         />
       </div>
 
-      {/* Price header + prediction badge */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+      {/* ── Price header + prediction badge ──────────────────────────────────── */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        flexWrap: 'wrap',
+        gap: '16px',
+        marginBottom: '16px',
+      }}>
         <PriceHeader metal={metal} data={allBars} loading={loading} lastUpdated={lastUpdated} />
         <PredictionBadge prediction={prediction} loading={predLoading} error={predError} />
       </div>
 
-      {/* Error state */}
+      {/* ── Error banner ─────────────────────────────────────────────────────── */}
       {error && (
-        <div style={{ padding: '12px 16px', background: '#ef444418', border: '1px solid #ef444440', borderRadius: '8px', color: '#ef4444', marginBottom: '16px', fontSize: '14px' }}>
+        <div style={{
+          padding: '12px 16px',
+          background: '#ef444418',
+          border: '1px solid #ef444440',
+          borderRadius: '8px',
+          color: '#ef4444',
+          marginBottom: '16px',
+          fontSize: '14px',
+        }}>
           {error}
         </div>
       )}
 
-      {/* Candlestick chart */}
+      {/* ── Candlestick chart ─────────────────────────────────────────────────── */}
       <div style={{ marginBottom: '16px' }}>
         <PriceChart data={allBars} metal={metal} height={380} />
       </div>
 
-      {/* Technical indicators */}
+      {/* ── Technical indicators ──────────────────────────────────────────────── */}
       {rsiData.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <RSIChart data={rsiData} />

@@ -41,6 +41,8 @@ export class MlStack extends cdk.Stack {
     };
 
     // ── Lambda: model-invoker (on-demand prediction) ──────────────────────────
+    // Private subnet: only needs RDS (security group) + S3 (Gateway endpoint)
+    // + Secrets Manager (Interface endpoint). No internet access required.
     this.modelInvokerFn = new PythonFunction(this, 'ModelInvokerFn', {
       functionName: 'model-invoker',
       entry: path.join(__dirname, '../../lambdas/model-invoker'),
@@ -50,9 +52,8 @@ export class MlStack extends cdk.Stack {
       memorySize: 256,
       timeout: cdk.Duration.seconds(30),
       vpc: storage.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [storage.lambdaSecurityGroup],
-      allowPublicSubnet: true,
       environment: sharedEnv,
     });
 
@@ -60,6 +61,7 @@ export class MlStack extends cdk.Stack {
     storage.modelBucket.grantRead(this.modelInvokerFn);
 
     // ── Lambda: model-trainer (weekly batch) ──────────────────────────────────
+    // Private subnet: only needs RDS + S3 (Gateway endpoint) + Secrets Manager.
     const modelTrainerFn = new PythonFunction(this, 'ModelTrainerFn', {
       functionName: 'model-trainer',
       entry: path.join(__dirname, '../../lambdas/model-trainer'),
@@ -69,9 +71,8 @@ export class MlStack extends cdk.Stack {
       memorySize: 512,
       timeout: cdk.Duration.minutes(10),
       vpc: storage.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [storage.lambdaSecurityGroup],
-      allowPublicSubnet: true,
       environment: sharedEnv,
     });
 

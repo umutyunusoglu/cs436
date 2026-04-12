@@ -16,6 +16,32 @@ lambdas/    Python Lambda handlers + requirements.txt per function
 frontend/   React SPA with TradingView Lightweight Charts
 ```
 
+## Architecture & Security Model
+
+CloudFront is the **single public entry point** for all browser traffic. The browser
+never calls the ALB, WebSocket API, or any other AWS resource directly.
+
+```
+Browser
+ └── CloudFront (one domain, HTTPS)
+       ├── /*        → S3 (static SPA)              [cached at edge]
+       ├── /api/*    → ALB → api-handler Lambda      [no cache; /api stripped by CF Function]
+       └── /ws       → WebSocket API GW              [no cache; /ws rewritten to / by CF Function]
+```
+
+**Network isolation layers:**
+
+| Layer | Subnet | Accessible from |
+|---|---|---|
+| ALB | Public | Internet (via CloudFront only in practice) |
+| `price-fetcher` Lambda | Public | EventBridge + internet (needs goldapi.io) |
+| `api-handler` Lambda | Public | ALB only |
+| `model-invoker` Lambda | **Private isolated** | api-handler (via Lambda API) |
+| `model-trainer` Lambda | **Private isolated** | EventBridge only |
+| RDS PostgreSQL | **Private isolated** | Lambda SG (port 5432 only) |
+| S3 buckets | — | Block all public access; Lambda via Gateway endpoint |
+| Secrets Manager | — | Lambda via Interface endpoint (VPC) |
+
 ## Stack Dependency Order
 
 ```
@@ -51,6 +77,9 @@ All Lambda functions read secrets via `boto3` at invocation time; never hardcode
 
 - RDS must stay `t3.micro`; do not resize.
 - Only one RDS instance at a time (750 hr/month limit).
+- No NAT Gateway — private-subnet Lambdas use VPC endpoints instead:
+  - S3 Gateway endpoint (free)
+  - Secrets Manager Interface endpoint (has cost after trial)
 - Secrets Manager is NOT perpetually free ($0.40/secret/month post-trial).
 - ALB free tier: 750 hrs/month — matches one instance running continuously.
 
@@ -60,3 +89,4 @@ All Lambda functions read secrets via `boto3` at invocation time; never hardcode
 - Lambda packaging: CDK `PythonFunction` construct (`aws_lambda_python_alpha`) bundles deps automatically using Docker.
 - CDK context variables (account/region) are resolved at deploy time via `process.env`.
 - All resources are tagged with `Project: price-tracker` and `Env: prod`.
+- Frontend API calls use relative paths (`/api/*`, `/ws`) — no env vars needed for URLs.
