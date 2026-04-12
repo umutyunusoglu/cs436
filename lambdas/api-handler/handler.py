@@ -187,19 +187,33 @@ def handle_ws_disconnect(connection_id: str) -> dict:
     logger.info("WS disconnected: %s", connection_id)
     return {"statusCode": 200}
 
+# A handler that updates the database whenever the frontend sends a ping message
+def handle_ws_ping(connection_id: str) -> dict:
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE ws_connections SET last_ping = NOW() WHERE connection_id = %s",
+            (connection_id,)
+        )
+    conn.commit()
+    return {"statusCode": 200}
 
 # ── Router ────────────────────────────────────────────────────────────────────
 
 def lambda_handler(event, context):
     logger.debug("Event: %s", json.dumps(event, default=str))
 
-    # WebSocket events
     request_context = event.get("requestContext", {})
     route_key = request_context.get("routeKey")
+    
+    # WebSocket routing
     if route_key == "$connect":
         return handle_ws_connect(request_context["connectionId"])
     if route_key == "$disconnect":
         return handle_ws_disconnect(request_context["connectionId"])
+    # Route custom ping messages or default fallbacks to update liveness
+    if route_key == "ping" or route_key == "$default":
+        return handle_ws_ping(request_context["connectionId"])
 
     # REST events
     path = event.get("path", "") or event.get("rawPath", "")

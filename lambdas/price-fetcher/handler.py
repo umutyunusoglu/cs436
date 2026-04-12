@@ -1,7 +1,7 @@
 """price-fetcher Lambda
 
 Triggered every 5 minutes by EventBridge Scheduler.
-1. Fetches current XAU and XAG spot prices from goldapi.io.
+1. Fetches current XAU and XAG spot prices from Tiingo.
 2. Writes an OHLC record for the current 5-minute bucket to RDS.
 3. Broadcasts the new price to all active WebSocket clients.
 """
@@ -20,26 +20,48 @@ from db import get_connection
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-METALS = ["XAU", "XAG"]
-CURRENCY = "USD"
+# 1. Global Secrets Cache (Cold Start Optimization)
+secrets_client = boto3.client("secretsmanager")
+_api_key = None
 
 
-def _fetch_price(metal: str, api_key: str) -> dict:
-    """Fetch spot price from goldapi.io for the given metal symbol."""
-    url = f"https://www.goldapi.io/api/{metal}/{CURRENCY}"
-    headers = {"x-access-token": api_key, "Content-Type": "application/json"}
+def get_api_key():
+    global _api_key
+    if not _api_key:
+        secret = json.loads(
+            secrets_client.get_secret_value(SecretId=os.environ["API_SECRET_ARN"])["SecretString"]
+        )
+        _api_key = secret["api_key"]
+    return _api_key
+
+
+# Map Tiingo tickers back to our database format
+TICKER_MAP = {"xauusd": "XAU", "xagusd": "XAG"}
+
+def _fetch_prices(api_key: str) -> list[dict]:
+    """Fetch spot prices for multiple metals from Tiingo in one call."""
+    tickers = ",".join(TICKER_MAP.keys())
+    url = f"https://api.tiingo.com/tiingo/fx/top?tickers={tickers}"
+    
+    # Tiingo uses Authorization: Token headers
+    headers = {"Authorization": f"Token {api_key}", "Content-Type": "application/json"}
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
-    data = resp.json()
-    return {
-        "metal": metal,
-        "price": float(data["price"]),
-        "open": float(data.get("open_price", data["price"])),
-        "high": float(data.get("high_price", data["price"])),
-        "low": float(data.get("low_price", data["price"])),
-        "close": float(data["price"]),
-    }
-
+    
+    results = []
+    for item in resp.json():
+        metal = TICKER_MAP.get(item["ticker"])
+        if not metal:
+            continue
+        price = float(item["midPrice"])
+        results.append({
+            "metal": metal,
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+        })
+    return results
 
 def _bucket_timestamp() -> datetime:
     """Round down to the nearest 5-minute bucket (UTC)."""
@@ -104,24 +126,19 @@ def _broadcast(connection_ids: list[str], payload: dict) -> None:
 
 def lambda_handler(event, context):
     logger.info("price-fetcher invoked")
-
-    # Retrieve API key from Secrets Manager
-    secrets_client = boto3.client("secretsmanager")
-    secret = json.loads(
-        secrets_client.get_secret_value(
-            SecretId=os.environ["API_SECRET_ARN"]
-        )["SecretString"]
-    )
-    api_key = secret["api_key"]
-
+    
+    api_key = get_api_key()
     bucket_ts = _bucket_timestamp()
     conn = get_connection()
     ws_payload: dict = {"event": "price_update", "timestamp": bucket_ts.isoformat()}
 
-    for metal in METALS:
-        try:
-            record = _fetch_price(metal, api_key)
+    try:
+        # Fetch both metals in one network request
+        records = _fetch_prices(api_key)
+        for record in records:
+            metal = record["metal"]
             _upsert_ohlc(conn, record, bucket_ts)
+            
             ws_payload[metal] = {
                 "open": record["open"],
                 "high": record["high"],
@@ -129,13 +146,14 @@ def lambda_handler(event, context):
                 "close": record["close"],
             }
             logger.info("Wrote %s OHLC: close=%.4f", metal, record["close"])
-        except Exception as exc:
-            logger.error("Failed to fetch/store %s: %s", metal, exc)
+    except Exception as exc:
+        logger.error("Failed to fetch/store prices: %s", exc)
 
     # Broadcast to WebSocket clients
     try:
         connection_ids = _get_active_connections(conn)
-        _broadcast(connection_ids, ws_payload)
+        if connection_ids:
+            _broadcast(connection_ids, ws_payload)
     except Exception as exc:
         logger.warning("WebSocket broadcast failed: %s", exc)
 

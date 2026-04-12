@@ -22,26 +22,35 @@ from db import get_connection
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Warm-invocation cache: { metal -> {model, feature_cols, model_ver} }
+# Warm-invocation cache
 _model_cache: dict = {}
-
+_model_etag: dict = {}
 
 def _load_model(metal: str) -> dict:
-    if metal in _model_cache:
-        return _model_cache[metal]
-
     bucket = os.environ["MODEL_BUCKET"]
     key = f"{metal}/model.pkl"
-
     s3 = boto3.client("s3")
+
+    # 1. Fetch just the metadata to get the latest ETag
     try:
-        obj = s3.get_object(Bucket=bucket, Key=key)
-    except s3.exceptions.NoSuchKey:
+        head_resp = s3.head_object(Bucket=bucket, Key=key)
+        current_etag = head_resp["ETag"]
+    except s3.exceptions.ClientError:
         raise ValueError(f"No trained model found for {metal}. Run model-trainer first.")
 
+    # 2. Return cached model if ETag matches
+    if metal in _model_cache and _model_etag.get(metal) == current_etag:
+        return _model_cache[metal]
+
+    # 3. Cache miss or stale model: download the fresh artifact
+    obj = s3.get_object(Bucket=bucket, Key=key)
     artifact = joblib.load(io.BytesIO(obj["Body"].read()))
+    
+    # Update state
     _model_cache[metal] = artifact
-    logger.info("Loaded model for %s (v%s)", metal, artifact.get("model_ver"))
+    _model_etag[metal] = current_etag
+    
+    logger.info("Loaded fresh model for %s (v%s)", metal, artifact.get("model_ver"))
     return artifact
 
 

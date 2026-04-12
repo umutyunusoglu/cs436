@@ -86,10 +86,11 @@ def _load_data(conn, metal: str) -> pd.DataFrame:
         SELECT open, high, low, close, timestamp
         FROM ohlc_prices
         WHERE metal = %s
-          AND timestamp > NOW() - INTERVAL '%s days'
+          AND timestamp > NOW() - (INTERVAL '1 day' * %s)
         ORDER BY timestamp ASC
     """
     with conn.cursor() as cur:
+        # Pass the parameter safely without string interpolation
         cur.execute(sql, (metal, LOOKBACK_DAYS))
         rows = cur.fetchall()
 
@@ -114,7 +115,7 @@ def _train_model(df: pd.DataFrame, feature_cols: list) -> RandomForestClassifier
         n_estimators=100,
         max_depth=8,
         random_state=42,
-        n_jobs=-1,
+        n_jobs=1,  # FIX: Changed from -1 to prevent thread thrashing on 512MB Lambda
     )
     model.fit(X_train, y_train)
 
