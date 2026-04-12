@@ -1,39 +1,35 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import type { LivePriceUpdate, Metal } from '../types';
 
+const WS_URL = import.meta.env.VITE_WS_URL ?? '';
 const RECONNECT_DELAY_MS = 5_000;
+const PING_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes, as AWS API Gateway has a strict, non-adjustable rule: it will forcibly close any WebSocket connection that remains completely silent for 10 minutes.
 
-/**
- * Derives the WebSocket URL from the current page origin so it always
- * routes through CloudFront (/ws) regardless of environment.
- *   https://d1234.cloudfront.net  →  wss://d1234.cloudfront.net/ws
- *   http://localhost:3000          →  ws://localhost:3000/ws
- */
-function getWsUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws`;
-}
 
-export type WsStatus = 'connecting' | 'connected' | 'disconnected';
 
 export function useWebSocket(
   metal: Metal,
   onUpdate: (bar: NonNullable<LivePriceUpdate['XAU']> & { timestamp: string }) => void,
-): { status: WsStatus } {
+) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const unmounted = useRef(false);
-  const [status, setStatus] = useState<WsStatus>('connecting');
 
   const connect = useCallback(() => {
-    if (unmounted.current) return;
+    if (!WS_URL || unmounted.current) return;
 
-    setStatus('connecting');
-    const ws = new WebSocket(getWsUrl());
+    const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (!unmounted.current) setStatus('connected');
+      // Start sending periodic pings to keep the connection alive
+      // and update the last_ping column in the RDS database
+      pingTimer.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'ping' }));
+        }
+      }, PING_INTERVAL_MS);
     };
 
     ws.onmessage = (evt) => {
@@ -50,8 +46,8 @@ export function useWebSocket(
     };
 
     ws.onclose = () => {
+      if (pingTimer.current) clearInterval(pingTimer.current);
       if (!unmounted.current) {
-        setStatus('disconnected');
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
       }
     };
@@ -66,9 +62,8 @@ export function useWebSocket(
     return () => {
       unmounted.current = true;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (pingTimer.current) clearInterval(pingTimer.current);
       wsRef.current?.close();
     };
   }, [connect]);
-
-  return { status };
 }
