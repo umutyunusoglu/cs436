@@ -49,3 +49,7 @@ npm-debug.log*
 # Lambda build artifacts
 lambdas/**/package/
 lambdas/**/.build/
+
+
+# Yigit's personal notes
+/proj-outline-0.txt
