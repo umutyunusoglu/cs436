@@ -53,6 +53,7 @@ export class ApiStack extends cdk.Stack {
     // The browser never calls this Lambda directly — only via ALB → CloudFront.
     const apiHandlerFn = new PythonFunction(this, 'ApiHandlerFn', {
       functionName: 'api-handler',
+      layers: [storage.sharedLayer],
       entry: path.join(__dirname, '../../lambdas/api-handler'),
       runtime: lambda.Runtime.PYTHON_3_12,
       index: 'handler.py',

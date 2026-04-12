@@ -8,47 +8,44 @@ Usage:
         cur.execute("SELECT ...")
 """
 
+
 import json
 import os
 import boto3
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-_connection = None  # Module-level cache for warm Lambda reuse
-
-
-def _get_secret(secret_arn: str) -> dict:
-    client = boto3.client("secretsmanager")
-    response = client.get_secret_value(SecretId=secret_arn)
-    return json.loads(response["SecretString"])
-
+_connection = None
+_db_credentials = None  # Global cache for cold-start secrets optimization
 
 def get_connection():
-    """Return a (possibly cached) psycopg2 connection.
-
-    Reads DB credentials from Secrets Manager on first call, then reuses the
-    connection across warm invocations. A stale/closed connection is
-    automatically replaced.
     """
-    global _connection
+    Return a cached psycopg2 connection.
+    Fetches credentials ONCE during the Lambda cold start.
+    """
+    global _connection, _db_credentials
 
+    # 1. Return warm connection if valid
     if _connection is not None and not _connection.closed:
         try:
-            # Quick liveness check
             _connection.cursor().execute("SELECT 1")
             return _connection
         except Exception:
             _connection = None
 
-    secret_arn = os.environ["DB_SECRET_ARN"]
-    secret = _get_secret(secret_arn)
+    # 2. Fetch secret only if not cached (Cold Start)
+    if not _db_credentials:
+        client = boto3.client("secretsmanager")
+        response = client.get_secret_value(SecretId=os.environ["DB_SECRET_ARN"])
+        _db_credentials = json.loads(response["SecretString"])
 
+    # 3. Establish new connection
     _connection = psycopg2.connect(
         host=os.environ["DB_HOST"],
         port=int(os.environ.get("DB_PORT", "5432")),
         dbname=os.environ["DB_NAME"],
-        user=secret["username"],
-        password=secret["password"],
+        user=_db_credentials["username"],
+        password=_db_credentials["password"],
         connect_timeout=5,
         cursor_factory=RealDictCursor,
     )

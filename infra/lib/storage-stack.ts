@@ -4,6 +4,9 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import { PythonLayerVersion } from '@aws-cdk/aws-lambda-python-alpha';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as path from 'path';
 import {
   COMMON_TAGS,
   RDS_DB_NAME,
@@ -13,6 +16,7 @@ import {
   BUCKET_STATIC_WEB,
 } from './shared/constants';
 
+
 export interface StorageStackOutputs {
   vpc: ec2.Vpc;
   lambdaSecurityGroup: ec2.SecurityGroup;
@@ -21,6 +25,7 @@ export interface StorageStackOutputs {
   apiKeySecret: secretsmanager.Secret;
   modelBucket: s3.Bucket;
   staticWebBucket: s3.Bucket;
+  sharedLayer: PythonLayerVersion;
 }
 
 export class StorageStack extends cdk.Stack {
@@ -31,6 +36,7 @@ export class StorageStack extends cdk.Stack {
   public readonly apiKeySecret: secretsmanager.Secret;
   public readonly modelBucket: s3.Bucket;
   public readonly staticWebBucket: s3.Bucket;
+  public readonly sharedLayer: PythonLayerVersion;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -161,6 +167,13 @@ export class StorageStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'StaticWebBucketName', {
       value: this.staticWebBucket.bucketName,
       exportName: 'StaticWebBucketName',
+    });
+
+    // ── Shared Lambda Layer ──────────────────────────────────────────────────
+    this.sharedLayer = new PythonLayerVersion(this, 'SharedDbLayer', {
+      entry: path.join(__dirname, '../../lambdas/shared-layer'),
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
+      description: 'Shared database helper and core dependencies',
     });
   }
 }

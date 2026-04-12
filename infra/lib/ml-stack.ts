@@ -45,6 +45,7 @@ export class MlStack extends cdk.Stack {
     // + Secrets Manager (Interface endpoint). No internet access required.
     this.modelInvokerFn = new PythonFunction(this, 'ModelInvokerFn', {
       functionName: 'model-invoker',
+      layers: [storage.sharedLayer],
       entry: path.join(__dirname, '../../lambdas/model-invoker'),
       runtime: lambda.Runtime.PYTHON_3_12,
       index: 'handler.py',
@@ -64,6 +65,7 @@ export class MlStack extends cdk.Stack {
     // Private subnet: only needs RDS + S3 (Gateway endpoint) + Secrets Manager.
     const modelTrainerFn = new PythonFunction(this, 'ModelTrainerFn', {
       functionName: 'model-trainer',
+      layers: [storage.sharedLayer],
       entry: path.join(__dirname, '../../lambdas/model-trainer'),
       runtime: lambda.Runtime.PYTHON_3_12,
       index: 'handler.py',

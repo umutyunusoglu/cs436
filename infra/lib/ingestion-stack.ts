@@ -38,6 +38,7 @@ export class IngestionStack extends cdk.Stack {
     this.priceFetcherFn = new PythonFunction(this, 'PriceFetcherFn', {
       functionName: 'price-fetcher',
       // ... keep existing paths/runtime configurations ...
+      layers: [storage.sharedLayer],
       vpc: storage.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [storage.lambdaSecurityGroup],
