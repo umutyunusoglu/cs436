@@ -4,8 +4,8 @@ A full-stack AWS application that tracks XAU/XAG spot prices in near real-time, 
 
 ## Architecture
 
-```
-goldapi.io
+```text
+Tiingo API
     │
     ▼ (every 5 min)
 EventBridge Scheduler ──► Lambda: price-fetcher ──► RDS PostgreSQL (t3.micro)
@@ -15,31 +15,33 @@ EventBridge Scheduler ──► Lambda: price-fetcher ──► RDS PostgreSQL (
                           Browser ──► CloudFront ──► S3: static-web (React SPA)
                                            │
                                            ▼
-                                    ALB ──► API Gateway ──► Lambda: api-handler ──► RDS
-                                                                     │
-                                                           Lambda: model-invoker ◄── S3
+                                   REST API Gateway ──► Lambda: api-handler ──► RDS
+                                                                  │
+                                                        Lambda: model-invoker ◄── S3
+
+                          Browser ──► WebSocket API Gateway ◄── Lambda: price-fetcher
 ```
 
 ## Prerequisites
 
-- [AWS CLI](https://aws.amazon.com/cli/) configured (`aws configure`)
-- [Node.js](https://nodejs.org/) >= 18
-- [Python](https://www.python.org/) >= 3.12
-- [AWS CDK](https://aws.amazon.com/cdk/) v2: `npm install -g aws-cdk`
-- A free API key from [goldapi.io](https://www.goldapi.io/)
+- AWS CLI configured (`aws configure`)
+- Node.js >= 18
+- Python >= 3.12
+- AWS CDK v2: `npm install -g aws-cdk`
+- A free API token from [Tiingo](https://www.tiingo.com/)
 
 ## Project Structure
 
 ```
 cs436/
-├── infra/          # AWS CDK TypeScript — all infrastructure as code
-├── lambdas/        # Python Lambda functions
-│   ├── shared/     # Shared DB helper
+├── infra/            # AWS CDK TypeScript — all infrastructure as code
+├── lambdas/          # Python Lambda functions
+│   ├── shared-layer/ # AWS Lambda Layer (psycopg2, boto3, db helper)
 │   ├── price-fetcher/
 │   ├── model-trainer/
 │   ├── model-invoker/
 │   └── api-handler/
-└── frontend/       # React + Vite SPA
+└── frontend/         # React + Vite SPA
 ```
 
 ## Deployment
@@ -58,27 +60,27 @@ cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
 cdk deploy StorageStack
 ```
 
-This creates the VPC, RDS PostgreSQL instance, S3 buckets, and Secrets Manager secrets.
+This creates the VPC, RDS PostgreSQL instance, S3 buckets, the shared Lambda Layer, and Secrets Manager secrets.
 
 ### 3. Configure Secrets
 
-After `StorageStack` deploys, add your goldapi.io key to Secrets Manager:
+After `StorageStack` deploys, add your Tiingo token to Secrets Manager:
 
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id metals-api-key \
-  --secret-string '{"api_key":"YOUR_GOLDAPI_KEY"}'
+  --secret-string '{"api_key":"YOUR_TIINGO_KEY"}'
 ```
 
 ### 4. Run Database Migration
 
-Connect to RDS via the bastion host or AWS Systems Manager Session Manager:
+Connect to the RDS instance using the outputted endpoint and run the SQL schema:
 
 ```bash
 psql -h <rds-endpoint> -U postgres -d pricetracker -f infra/schema.sql
 ```
 
-### 5. Deploy Lambda Stacks
+### 5. Deploy Compute & API Stacks
 
 ```bash
 cdk deploy IngestionStack MlStack ApiStack
@@ -86,26 +88,14 @@ cdk deploy IngestionStack MlStack ApiStack
 
 ### 6. Build and Deploy Frontend
 
+Retrieve the API URLs from the previous step and insert them into `frontend/.env.production`, then compile and deploy:
+
 ```bash
 cd ../frontend
 npm install
 npm run build
 cd ../infra
-cdk deploy FrontendStack
-```
-
-### 7. Deploy Monitoring
-
-```bash
-cdk deploy MonitoringStack
-```
-
-### 8. Get Endpoints
-
-```bash
-cdk outputs ApiStack     # REST API URL
-cdk outputs ApiStack     # WebSocket URL
-cdk outputs FrontendStack  # CloudFront URL
+cdk deploy FrontendStack MonitoringStack
 ```
 
 ## API Endpoints
@@ -115,7 +105,7 @@ cdk outputs FrontendStack  # CloudFront URL
 | GET | `/prices?metal=gold&range=7d` | OHLC price history |
 | GET | `/predict?metal=gold` | ML direction prediction |
 | GET | `/technical?metal=silver` | RSI + MACD indicators |
-| WS | `wss://<ws-url>` | Real-time price stream |
+| WS | `wss://<ws-url>` | Real-time price stream (ping every 4 min) |
 
 ## Free Tier Usage
 
@@ -126,9 +116,10 @@ cdk outputs FrontendStack  # CloudFront URL
 | S3 | 5 GB | < 100 MB |
 | API Gateway | 1M calls/month | Low traffic |
 | CloudFront | 1 TB transfer | SPA traffic |
-| ALB | 750 hrs/month | 744 hrs/month |
 
-> **Note**: AWS Secrets Manager costs $0.40/secret/month after the 30-day trial. Consider SSM Parameter Store (free) as a no-cost alternative.
+> **Note:** AWS Secrets Manager costs $0.40/secret/month after the 30-day trial.
+
+> **Note:** RDS t3.micro converts to standard hourly billing exactly 12 months after AWS account creation.
 
 ## Local Development
 
@@ -137,16 +128,7 @@ cdk outputs FrontendStack  # CloudFront URL
 ```bash
 cd frontend
 npm install
-# Point to your deployed API
-echo "VITE_API_URL=https://your-alb-dns" > .env.local
-echo "VITE_WS_URL=wss://your-ws-api-id.execute-api.region.amazonaws.com/prod" >> .env.local
+cp .env.example .env.local
+# Fill in VITE_API_URL and VITE_WS_URL with your deployed endpoints
 npm run dev
-```
-
-### Lambda (local testing)
-
-```bash
-cd lambdas/price-fetcher
-pip install -r requirements.txt
-python -c "import handler; handler.lambda_handler({}, {})"
 ```

@@ -53,7 +53,8 @@ export class MlStack extends cdk.Stack {
       memorySize: 256,
       timeout: cdk.Duration.seconds(30),
       vpc: storage.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC }, // Changed from PRIVATE_ISOLATED
+      allowPublicSubnet: true, // Added
       securityGroups: [storage.lambdaSecurityGroup],
       environment: sharedEnv,
     });
@@ -73,7 +74,8 @@ export class MlStack extends cdk.Stack {
       memorySize: 512,
       timeout: cdk.Duration.minutes(10),
       vpc: storage.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC }, // Changed from PRIVATE_ISOLATED
+      allowPublicSubnet: true, // Added
       securityGroups: [storage.lambdaSecurityGroup],
       environment: sharedEnv,
     });

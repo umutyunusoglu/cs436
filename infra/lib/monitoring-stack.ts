@@ -27,7 +27,8 @@ export class MonitoringStack extends cdk.Stack {
       displayName: 'Price Tracker Alarms',
     });
 
-    alarmTopic.addSubscription(new snsSubscriptions.EmailSubscription('your.email@example.com'));
+    const alarmEmail = this.node.tryGetContext('alarmEmail') || 'hypnos.cs436@protonmail.com';
+    alarmTopic.addSubscription(new snsSubscriptions.EmailSubscription(alarmEmail));
     
 
     // ── Helper: Lambda error rate alarm ──────────────────────────────────────

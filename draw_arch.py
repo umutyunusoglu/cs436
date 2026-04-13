@@ -11,7 +11,6 @@ C = {
     "s3":      "#3F8624",
     "lambda":  "#E8701A",
     "rds":     "#3B48CC",
-    "alb":     "#8C4FFF",
     "apigw":   "#E8701A",
     "eb":      "#C7131F",
     "sm":      "#DD344C",
@@ -33,7 +32,7 @@ def nd(label, fill, fc="white", shape="box", w="1.7", h="0.65"):
 dot = graphviz.Digraph(
     graph_attr={
         "rankdir":   "TB",
-        "splines":   "curved",
+        "splines":   "true",
         "compound":  "true",
         "newrank":   "true",
         "nodesep":   "0.55",
@@ -49,10 +48,11 @@ dot = graphviz.Digraph(
 
 # ── External actors (no cluster) ──────────────────────────────────────────────
 dot.node("browser", **nd("Browser\n(React SPA)", C["ext"], shape="ellipse", w="1.4"))
-dot.node("goldapi",  **nd("goldapi.io\n(XAU / XAG)", C["ext"], shape="ellipse", w="1.4"))
+dot.node("tiingo",  **nd("Tiingo API\n(XAU / XAG)", C["ext"], shape="ellipse", w="1.4"))
 
 # ── AWS-managed services outside VPC ─────────────────────────────────────────
 dot.node("ws_api",   **nd("WebSocket\nAPI Gateway", C["apigw"]))
+dot.node("rest_api", **nd("REST\nAPI Gateway", C["apigw"]))
 dot.node("eb_fetch", **nd("EventBridge\nevery 5 min", C["eb"]))
 dot.node("eb_train", **nd("EventBridge\nSunday 03:00 UTC", C["eb"]))
 
@@ -89,21 +89,20 @@ with dot.subgraph(name="cluster_vpc") as vpc:
             color="#0972D3", penwidth="2",
             fontname="Helvetica", fontsize="11", fontcolor="#0972D3",
         )
-        pub.node("alb",         **nd("ALB  (HTTP :80)", C["alb"]))
         pub.node("api_handler", **nd("api-handler λ\n256 MB · 15 s", C["lambda"]))
         pub.node("pf",          **nd("price-fetcher λ\n128 MB · 30 s", C["lambda"]))
+        pub.node("invoker",     **nd("model-invoker λ\n512 MB · 30 s", C["lambda"]))
+        pub.node("trainer",     **nd("model-trainer λ\n512 MB · 10 min", C["lambda"]))
 
     # Private isolated subnet ──────────────────────────────────────────────────
     with vpc.subgraph(name="cluster_private") as priv:
         priv.attr(
-            label="🔒  Private Isolated Subnets\n(no internet route — VPC endpoints only)",
+            label="🔒  Private Isolated Subnets\n(no internet route)",
             style="filled", fillcolor="#E6FAF5",
             color="#148A8A", penwidth="2",
             fontname="Helvetica", fontsize="11", fontcolor="#148A8A",
         )
-        priv.node("invoker", **nd("model-invoker λ\n256 MB · 30 s", C["lambda"]))
-        priv.node("trainer", **nd("model-trainer λ\n512 MB · 10 min", C["lambda"]))
-        priv.node("rds",     **nd("RDS PostgreSQL\nt3.micro", C["rds"]))
+        priv.node("rds", **nd("RDS PostgreSQL\nt3.micro", C["rds"]))
 
     # VPC Endpoints ────────────────────────────────────────────────────────────
     with vpc.subgraph(name="cluster_ep") as ep:
@@ -113,7 +112,6 @@ with dot.subgraph(name="cluster_vpc") as vpc:
             color="#7c3aed", penwidth="1.5",
             fontname="Helvetica", fontsize="10", fontcolor="#7c3aed",
         )
-        ep.node("sm_ep", **nd("Secrets Manager\n(interface endpoint)", C["sm"]))
         ep.node("s3_gw", **nd("S3 Gateway endpoint\n(free)", C["s3"]))
 
 # ── Monitoring cluster ────────────────────────────────────────────────────────
@@ -135,20 +133,18 @@ MN = dict(color="#aaaaaa", penwidth="1.0", style="dashed", arrowhead="none")
 # Browser → CloudFront
 dot.edge("browser", "cf",         **E)
 dot.edge("cf",      "web_bucket", label=" /*",     **E)
-dot.edge("cf",      "alb",        label=" /api/*", **E)
+dot.edge("cf",      "rest_api",   label=" /api/*", **E)
 dot.edge("cf",      "ws_api",     label=" /ws",    **E)
 
-# WebSocket API GW → api-handler (and price-fetcher pushes back)
-dot.edge("ws_api",   "api_handler",           **E)
-dot.edge("pf",       "ws_api", label=" push", **E)
-
-# ALB → api-handler
-dot.edge("alb", "api_handler", **E)
+# API Gateways → api-handler
+dot.edge("rest_api", "api_handler", **E)
+dot.edge("ws_api",   "api_handler", **E)
+dot.edge("pf",       "ws_api",      label=" push", **E)
 
 # Ingestion
 dot.edge("eb_fetch", "pf",  **E)
-dot.edge("goldapi",   "pf",  **E)
-dot.edge("pf",        "rds", **E)
+dot.edge("tiingo",   "pf",  **E)
+dot.edge("pf",       "rds", **E)
 
 # API handler → private
 dot.edge("api_handler", "invoker", label=" invoke", **E)
@@ -161,19 +157,22 @@ dot.edge("invoker",  "m_bucket",  **E)
 dot.edge("trainer",  "rds",       **E)
 dot.edge("trainer",  "m_bucket",  **E)
 
-# VPC endpoints (dashed purple)
-for src in ["pf", "api_handler", "invoker", "trainer"]:
-    dot.edge(src, "sm_ep", **EP)
+# S3 VPC Endpoint routing
 for src in ["invoker", "trainer"]:
     dot.edge(src, "s3_gw", **EP)
-dot.edge("sm_ep", "sm_rds",   **EP)
-dot.edge("sm_ep", "sm_api",   **EP)
 dot.edge("s3_gw", "m_bucket", **EP)
+
+# Secrets Manager routing (direct from Lambdas via IGW)
+for src in ["pf", "api_handler", "invoker", "trainer"]:
+    dot.edge(src, "sm_rds", **EP)
+dot.edge("pf", "sm_api", **EP)
 
 # Monitoring (dashed grey, no arrowhead)
 for src in ["pf", "api_handler", "invoker", "trainer", "rds"]:
     dot.edge(src, "cw", **MN)
 dot.edge("cw", "sns", color=C["cw"], penwidth="1.4", fontname="Helvetica")
 
-dot.render("architecture", cleanup=True)
-print("architecture.png written.")
+dot.render("architecture-new", cleanup=True)
+print("architecture-new.pdf written.")
+dot.render("architecture-new", format="png", cleanup=True)
+print("architecture-new.png written.")

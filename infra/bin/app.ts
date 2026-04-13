@@ -34,9 +34,10 @@ const ingestion = new IngestionStack(app, 'IngestionStack', { env, storage, api 
 ingestion.addDependency(storage);
 ingestion.addDependency(api);
 
-// Layer 5: Frontend (CloudFront + S3 deployment)
-const frontend = new FrontendStack(app, 'FrontendStack', { env, storage });
+// Layer 5: Frontend (Now requires API)
+const frontend = new FrontendStack(app, 'FrontendStack', { env, storage, api });
 frontend.addDependency(storage);
+frontend.addDependency(api);
 
 // Layer 6: Monitoring (CloudWatch dashboard + alarms)
 const monitoring = new MonitoringStack(app, 'MonitoringStack', { env, storage, api });

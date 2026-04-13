@@ -16,6 +16,7 @@ import {
   ENV_DB_HOST,
   ENV_DB_NAME,
   ENV_DB_PORT,
+  ENV_WS_ENDPOINT,
   RDS_DB_NAME,
   RDS_PORT,
 } from './shared/constants';
@@ -37,7 +38,12 @@ export class IngestionStack extends cdk.Stack {
 
     this.priceFetcherFn = new PythonFunction(this, 'PriceFetcherFn', {
       functionName: 'price-fetcher',
-      // ... keep existing paths/runtime configurations ...
+      entry: path.join(__dirname, '../../lambdas/price-fetcher'),
+      runtime: lambda.Runtime.PYTHON_3_12,
+      index: 'handler.py',
+      handler: 'lambda_handler',
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
       layers: [storage.sharedLayer],
       vpc: storage.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
@@ -56,6 +62,12 @@ export class IngestionStack extends cdk.Stack {
     // Grant Secrets Manager read access
     storage.dbSecret.grantRead(this.priceFetcherFn);
     storage.apiKeySecret.grantRead(this.priceFetcherFn);
+
+    // Grant API Gateway Management permissions for WebSocket broadcast
+    this.priceFetcherFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['execute-api:ManageConnections'],
+      resources: [`arn:aws:execute-api:${this.region}:${this.account}:*/prod/POST/@connections/*`],
+    }));
 
     // ── EventBridge Scheduler — every 5 minutes ───────────────────────────────
     const fetchRule = new events.Rule(this, 'PriceFetchSchedule', {

@@ -7,6 +7,7 @@ import * as path from 'path';
 import { StorageStack } from './storage-stack';
 import { ApiStack } from './api-stack';
 import { COMMON_TAGS } from './shared/constants';
+import { HttpOrigin } from 'aws-cdk-lib/aws-cloudfront-origins'
 
 interface FrontendStackProps extends cdk.StackProps {
   storage: StorageStack;
@@ -47,34 +48,14 @@ function handler(event) {
       `.trim()),
     });
 
-    // ── CloudFront Function: map /ws to / before forwarding to WebSocket API ──
-    // WebSocket API GW accepts connections at /{stage}; originPath handles the
-    // stage suffix so the viewer-facing URI just needs to become /.
-    const wsRewriteFn = new cloudfront.Function(this, 'WsPathRewrite', {
-      functionName: 'price-tracker-ws-rewrite',
-      comment: 'Rewrites /ws to / before forwarding to WebSocket API GW origin',
-      code: cloudfront.FunctionCode.fromInline(`
-function handler(event) {
-  var request = event.request;
-  request.uri = '/';
-  return request;
-}
-      `.trim()),
-    });
 
-    // ── ALB origin — serves all /api/* requests ───────────────────────────────
-    const albOrigin = new origins.LoadBalancerV2Origin(api.alb, {
-      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-      // ALB listens on port 80; CloudFront→ALB is internal AWS network
-    });
-
-    // ── WebSocket API GW origin — serves /ws upgrades ─────────────────────────
-    // api.wsApiExecuteUrl = "{apiId}.execute-api.{region}.amazonaws.com"
-    // originPath "/prod" maps CloudFront's / to the API stage root
-    const wsOrigin = new origins.HttpOrigin(api.wsApiExecuteUrl, {
+    // ── REST API origin — serves all /api/* requests ──────────────────────────
+    // Extracts the domain name from the API Gateway URL and routes to the /prod stage
+    const apiOrigin = new origins.HttpOrigin(cdk.Fn.parseDomainName(api.restApiUrl), {
       originPath: '/prod',
       protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
     });
+
 
     // ── CloudFront Distribution ───────────────────────────────────────────────
     const distribution = new cloudfront.Distribution(this, 'CloudFrontDist', {
@@ -90,7 +71,7 @@ function handler(event) {
         // /api/*  →  ALB  →  api-handler Lambda
         // Path prefix stripped by CloudFront Function before forwarding.
         '/api/*': {
-          origin: albOrigin,
+          origin: apiOrigin,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
@@ -102,24 +83,7 @@ function handler(event) {
               eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
             },
           ],
-        },
-        // /ws  →  WebSocket API Gateway
-        // CloudFront transparently proxies the WS upgrade; URI rewritten to /
-        // so API GW receives the connection at the stage root (/prod/).
-        '/ws': {
-          origin: wsOrigin,
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy:
-            cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-          functionAssociations: [
-            {
-              function: wsRewriteFn,
-              eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
-            },
-          ],
-        },
+        }
       },
       defaultRootObject: 'index.html',
       // SPA fallback: return index.html for 403/404 so React Router works
