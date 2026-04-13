@@ -37,7 +37,15 @@ export function PredictionBadge({ prediction, loading, error }: Props) {
 
   if (!prediction) return null;
 
-  const cfg = DIRECTION_CONFIG[prediction.direction];
+  // Force the API string to lowercase, and provide a safe fallback if the string is unrecognized
+  const safeDirection = (prediction.direction || '').toLowerCase() as keyof typeof DIRECTION_CONFIG;
+  
+  const cfg = DIRECTION_CONFIG[safeDirection] || { 
+    label: '— Unknown', 
+    color: '#64748b', 
+    bg: '#1e2433', 
+    border: '#334155' 
+  };
   const confidencePct = Math.round(prediction.confidence * 100);
   const barWidth = `${confidencePct}%`;
 

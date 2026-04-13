@@ -22,6 +22,9 @@ EventBridge Scheduler ──► Lambda: price-fetcher ──► RDS PostgreSQL (
                           Browser ──► WebSocket API Gateway ◄── Lambda: price-fetcher
 ```
 
+![Architecture Diagram](architecture-new.png)
+
+
 ## Prerequisites
 
 - AWS CLI configured (`aws configure`)
@@ -43,6 +46,57 @@ cs436/
 │   └── api-handler/
 └── frontend/         # React + Vite SPA
 ```
+
+## Local Testing
+
+![Webpage View](local-validation/webpage-ss.png)
+
+To ensure system stability and minimize AWS costs during development, this project includes a comprehensive **Local Validation Suite**. This environment allows you to test the full data pipeline — from API ingestion to frontend visualization — without deploying a single resource to the cloud.
+
+---
+
+### Local vs. AWS Comparison
+
+The local environment uses lightweight Python processes and Docker containers to mirror the production AWS architecture:
+
+| AWS Service | Local Simulation | Purpose |
+|---|---|---|
+| Amazon RDS | PostgreSQL (Docker) | Persistent storage for OHLC prices and ML predictions |
+| AWS Lambda | Native Python | Executes handler logic directly via the `api_emulator` and `scheduler` |
+| API Gateway | FastAPI (Uvicorn) | Simulates REST endpoints and WebSocket handshakes |
+| EventBridge | `scheduler.py` | Mimics 5-minute cron triggers to invoke the price-fetcher |
+| Secrets Manager | `mock_aws.py` | Intercepts `boto3` calls to provide local DB credentials and API keys |
+| CloudFront | Vite Proxy | Routes frontend `/api` requests to the local backend while handling CORS |
+
+---
+
+### Core Components
+
+The following scripts in `/local-validation` drive the simulation:
+
+**`api_emulator.py`**
+A FastAPI server that packages incoming HTTP requests into the AWS Proxy Event format required by `api-handler`. It also manages a local WebSocket server to broadcast live price updates to the React frontend.
+
+**`scheduler.py`**
+A continuous loop that triggers the `price-fetcher` Lambda logic every 5 minutes, keeping the local database consistently updated with real market data from the Tiingo API.
+
+**`mock_aws.py`**
+Uses `unittest.mock` to patch `boto3.client`, allowing Lambdas to fetch secrets from local files. This keeps sensitive API keys outside the repository while remaining accessible to the code.
+
+**`test_db.py`**
+A utility script that injects bulk historical data (70+ bars) into the `ohlc_prices` table. This satisfies the minimum data requirements for calculating RSI and MACD indicators.
+
+---
+
+### Running the Validation Suite
+
+1. **Start the database** — run `docker compose up -d` inside the `local-validation` folder to initialize the PostgreSQL container.
+2. **Configure secrets** — ensure your Tiingo API key is present in the file referenced by `path-to-apikey.txt`.
+3. **Launch the backend** — run `uvicorn api_emulator:app --port 8080` to start the API simulation.
+4. **Start ingestion** — run `python scheduler.py` to begin the 5-minute price fetching cycle.
+5. **Start the frontend** — run `npm run dev` in the `frontend` directory. The Vite proxy will automatically route all `/api` calls to your local emulator.
+
+
 
 ## Deployment
 

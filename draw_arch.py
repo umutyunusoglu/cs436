@@ -90,8 +90,8 @@ with dot.subgraph(name="cluster_vpc") as vpc:
             fontname="Helvetica", fontsize="11", fontcolor="#0972D3",
         )
         pub.node("api_handler", **nd("api-handler λ\n256 MB · 15 s", C["lambda"]))
-        pub.node("pf",          **nd("price-fetcher λ\n128 MB · 30 s", C["lambda"]))
-        pub.node("invoker",     **nd("model-invoker λ\n512 MB · 30 s", C["lambda"]))
+        pub.node("pf",          **nd("price-fetcher λ\n256 MB · 30 s", C["lambda"]))
+        pub.node("invoker",     **nd("model-invoker λ\n256 MB · 30 s", C["lambda"]))
         pub.node("trainer",     **nd("model-trainer λ\n512 MB · 10 min", C["lambda"]))
 
     # Private isolated subnet ──────────────────────────────────────────────────

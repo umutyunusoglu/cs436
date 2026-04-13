@@ -50,7 +50,8 @@ def _fetch_prices(api_key: str) -> list[dict]:
     
     results = []
     for item in resp.json():
-        metal = TICKER_MAP.get(item["ticker"])
+        # Force ticker to lowercase before looking it up in our map
+        metal = TICKER_MAP.get(item["ticker"].lower())
         if not metal:
             continue
         price = float(item["midPrice"])

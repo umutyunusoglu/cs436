@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: local-rds-simulator
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local_password
+      POSTGRES_DB: pricetracker
+    ports:
+      - "5432:5432"
+    volumes:
+      # This maps your local schema file directly into the container's init folder.
+      # Docker will automatically execute it the first time the database boots.
+      - ../infra/schema.sql:/docker-entrypoint-initdb.d/init.sql

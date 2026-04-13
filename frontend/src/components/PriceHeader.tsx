@@ -25,7 +25,7 @@ export function PriceHeader({ metal, data, loading, lastUpdated }: Props) {
     );
   }
 
-  if (data.length === 0) return null;
+  if (!data || data.length === 0) return null;
 
   const latest = data[data.length - 1];
   const first = data[0];

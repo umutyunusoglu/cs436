@@ -50,8 +50,12 @@ export default function App() {
   const { prediction, loading: predLoading, error: predError } = usePrediction(metal);
 
   // Merge historical + live bars, deduplicating by timestamp bucket
+  // 1. Ensure priceData is at least an empty array so we don't crash on .length
+  const safePriceData = priceData || [];
+
+  // 2. Merge historical + live bars, deduplicating by timestamp bucket
   const allBars = liveBars.length > 0
-    ? [...priceData, ...liveBars].reduce<OHLCBar[]>((acc, bar) => {
+    ? [...safePriceData, ...liveBars].reduce<OHLCBar[]>((acc, bar) => {
         const last = acc[acc.length - 1];
         if (last && last.timestamp === bar.timestamp) {
           acc[acc.length - 1] = bar; // update existing 5-min bucket in place
@@ -60,7 +64,7 @@ export default function App() {
         }
         return acc;
       }, [])
-    : priceData;
+    : safePriceData;
 
   const handleLiveUpdate = useCallback(
     (bar: { open: number; high: number; low: number; close: number; timestamp: string }) => {
@@ -87,8 +91,9 @@ export default function App() {
     fetchTechnical(metal)
       .then((resp) => {
         if (!cancelled) {
-          setRsiData(resp.rsi);
-          setMacdData(resp.macd);
+          // Add fallbacks here to prevent 'undefined' state
+          setRsiData(resp?.rsi || []); 
+          setMacdData(resp?.macd || []);
         }
       })
       .catch(() => {/* silently ignore */});
@@ -158,7 +163,7 @@ export default function App() {
       </div>
 
       {/* ── Technical indicators ──────────────────────────────────────────────── */}
-      {rsiData.length > 0 && (
+      {(rsiData?.length ?? 0) > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <RSIChart data={rsiData} />
           <MACDChart data={macdData} />
