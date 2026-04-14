@@ -49,7 +49,7 @@ cs436/
 
 ## Local Testing
 
-![Webpage View](local-validation/webpage-ss.png)
+![Webpage View](local-validation/webpage-ss-2.png)
 
 To ensure system stability and minimize AWS costs during development, this project includes a comprehensive **Local Validation Suite**. This environment allows you to test the full data pipeline — from API ingestion to frontend visualization — without deploying a single resource to the cloud.
 
