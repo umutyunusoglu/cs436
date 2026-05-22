@@ -54,8 +54,8 @@ def _compute_macd(series: pd.Series) -> pd.DataFrame:
 
 
 def _build_features(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.sort_values("timestamp").copy()
-    close = df["close"]
+    df = df.sort_values("timestamp_utc").copy()
+    close = df["close_price"]
 
     df["sma5"] = close.rolling(5).mean()
     df["sma20"] = close.rolling(20).mean()
@@ -83,11 +83,11 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def _load_data(conn, metal: str) -> pd.DataFrame:
     sql = """
-        SELECT open, high, low, close, timestamp
+        SELECT open_price, high_price, low_price, close_price, timestamp_utc
         FROM ohlc_prices
         WHERE metal = %s
-          AND timestamp > NOW() - (INTERVAL '1 day' * %s)
-        ORDER BY timestamp ASC
+          AND timestamp_utc > NOW() - (INTERVAL '1 day' * %s)
+        ORDER BY timestamp_utc ASC
     """
     with conn.cursor() as cur:
         # Pass the parameter safely without string interpolation
@@ -97,8 +97,8 @@ def _load_data(conn, metal: str) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(rows, columns=["open", "high", "low", "close", "timestamp"])
-    for col in ["open", "high", "low", "close"]:
+    df = pd.DataFrame(rows, columns=["open_price", "high_price", "low_price", "close_price", "timestamp_utc"])
+    for col in ["open_price", "high_price", "low_price", "close_price"]:
         df[col] = df[col].astype(float)
     return df
 

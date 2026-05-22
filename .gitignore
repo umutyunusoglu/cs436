@@ -55,3 +55,9 @@ lambdas/**/.build/
 /proj-outline-0.txt
 /output.txt
 /old-README.md
+
+# Data
+/ohlc_seed.csv
+
+#Large files
+lambdas/**/*.zip

@@ -43,24 +43,22 @@ def _fetch_prices(api_key: str) -> list[dict]:
     tickers = ",".join(TICKER_MAP.keys())
     url = f"https://api.tiingo.com/tiingo/fx/top?tickers={tickers}"
     
-    # Tiingo uses Authorization: Token headers
     headers = {"Authorization": f"Token {api_key}", "Content-Type": "application/json"}
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
     
     results = []
     for item in resp.json():
-        # Force ticker to lowercase before looking it up in our map
         metal = TICKER_MAP.get(item["ticker"].lower())
         if not metal:
             continue
         price = float(item["midPrice"])
         results.append({
             "metal": metal,
-            "open": price,
-            "high": price,
-            "low": price,
-            "close": price,
+            "open_price": price,
+            "high_price": price,
+            "low_price": price,
+            "close_price": price,
         })
     return results
 
@@ -74,12 +72,12 @@ def _bucket_timestamp() -> datetime:
 def _upsert_ohlc(conn, record: dict, bucket_ts: datetime) -> None:
     """Insert OHLC row; ignore if a record for this bucket already exists."""
     sql = """
-        INSERT INTO ohlc_prices (metal, open, high, low, close, timestamp)
-        VALUES (%(metal)s, %(open)s, %(high)s, %(low)s, %(close)s, %(timestamp)s)
-        ON CONFLICT (metal, timestamp) DO NOTHING
+        INSERT INTO ohlc_prices (metal, open_price, high_price, low_price, close_price, timestamp_utc)
+        VALUES (%(metal)s, %(open_price)s, %(high_price)s, %(low_price)s, %(close_price)s, %(timestamp_utc)s)
+        ON CONFLICT (metal, timestamp_utc) DO NOTHING
     """
     with conn.cursor() as cur:
-        cur.execute(sql, {**record, "timestamp": bucket_ts})
+        cur.execute(sql, {**record, "timestamp_utc": bucket_ts})
     conn.commit()
 
 
@@ -141,12 +139,12 @@ def lambda_handler(event, context):
             _upsert_ohlc(conn, record, bucket_ts)
             
             ws_payload[metal] = {
-                "open": record["open"],
-                "high": record["high"],
-                "low": record["low"],
-                "close": record["close"],
+                "open": record["open_price"],
+                "high": record["high_price"],
+                "low": record["low_price"],
+                "close": record["close_price"],
             }
-            logger.info("Wrote %s OHLC: close=%.4f", metal, record["close"])
+            logger.info("Wrote %s OHLC: close=%.4f", metal, record["close_price"])
     except Exception as exc:
         logger.error("Failed to fetch/store prices: %s", exc)
 

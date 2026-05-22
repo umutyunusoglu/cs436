@@ -75,10 +75,10 @@ def _compute_macd(series: pd.Series) -> pd.DataFrame:
 def _get_features(conn, metal: str, feature_cols: list) -> np.ndarray:
     """Fetch recent OHLC data and compute features; return last row as feature vector."""
     sql = """
-        SELECT open, high, low, close, timestamp
+        SELECT open_price, high_price, low_price, close_price, timestamp_utc
         FROM ohlc_prices
         WHERE metal = %s
-        ORDER BY timestamp DESC
+        ORDER BY timestamp_utc DESC
         LIMIT 60
     """
     with conn.cursor() as cur:
@@ -88,11 +88,11 @@ def _get_features(conn, metal: str, feature_cols: list) -> np.ndarray:
     if not rows or len(rows) < 30:
         raise ValueError(f"Not enough data for {metal} prediction ({len(rows)} rows)")
 
-    df = pd.DataFrame(rows[::-1], columns=["open", "high", "low", "close", "timestamp"])
-    for col in ["open", "high", "low", "close"]:
+    df = pd.DataFrame(rows[::-1], columns=["open_price", "high_price", "low_price", "close_price", "timestamp_utc"])
+    for col in ["open_price", "high_price", "low_price", "close_price"]:
         df[col] = df[col].astype(float)
 
-    close = df["close"]
+    close = df["close_price"]
     df["sma5"] = close.rolling(5).mean()
     df["sma20"] = close.rolling(20).mean()
     df["sma50"] = close.rolling(50).mean()

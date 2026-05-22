@@ -70,10 +70,10 @@ def handle_prices(params: dict) -> dict:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT open, high, low, close, volume, timestamp
+            SELECT open_price, high_price, low_price, close_price, timestamp_utc
             FROM ohlc_prices
-            WHERE metal = %s AND timestamp >= %s
-            ORDER BY timestamp ASC
+            WHERE metal = %s AND timestamp_utc >= %s
+            ORDER BY timestamp_utc ASC
             """,
             (metal, since),
         )
@@ -81,12 +81,12 @@ def handle_prices(params: dict) -> dict:
 
     data = [
         {
-            "open": float(r["open"]),
-            "high": float(r["high"]),
-            "low": float(r["low"]),
-            "close": float(r["close"]),
-            "volume": float(r["volume"]),
-            "timestamp": r["timestamp"].isoformat(),
+            "open": float(r["open_price"]),
+            "high": float(r["high_price"]),
+            "low": float(r["low_price"]),
+            "close": float(r["close_price"]),
+            "volume": 0.0,
+            "timestamp": r["timestamp_utc"].isoformat(),
         }
         for r in rows
     ]
@@ -131,10 +131,10 @@ def handle_technical(params: dict) -> dict:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT close, timestamp
+            SELECT close_price, timestamp_utc
             FROM ohlc_prices
             WHERE metal = %s
-            ORDER BY timestamp DESC
+            ORDER BY timestamp_utc DESC
             LIMIT 200
             """,
             (metal,),
@@ -145,8 +145,8 @@ def handle_technical(params: dict) -> dict:
         return _ok({"metal": metal, "rsi": [], "macd": []})
 
     rows = list(reversed(rows))
-    closes = [float(r["close"]) for r in rows]
-    timestamps = [r["timestamp"].isoformat() for r in rows]
+    closes = [float(r["close_price"]) for r in rows]
+    timestamps = [r["timestamp_utc"].isoformat() for r in rows]
 
     rsi_values = compute_rsi(closes, period=14)
     macd_values = compute_macd(closes)

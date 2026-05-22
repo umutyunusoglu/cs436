@@ -34,6 +34,31 @@
 
 ---
 
+## Required Repository Files
+
+Before beginning the console deployment, ensure you have the following local files ready and organized.
+
+> ⚠️ **CRITICAL PRE-DEPLOYMENT STEP:** Your Lambda functions rely on a shared database helper (`db.py`). In a CDK deployment, this file is automatically mounted as a Lambda Layer. For this manual console deployment, `db.py` must be physically present inside each Lambda's zip package. Ensure you have copied `lambdas/shared-layer/python/db.py` into every Lambda folder and run the packaging commands **before** beginning Phase 4.
+
+**Files needed per phase:**
+
+- **Phase 3 (Database):**
+  - `schema.sql` — table definitions (created locally before deployment)
+  - `ohlc_seed.csv` — your cleaned historical price data
+
+- **Phase 4 (Lambdas):** Each folder must contain `db.py` (copied above) plus its own files:
+  - `lambdas/price-fetcher/`: `handler.py`, `requirements.txt`, `db.py`
+  - `lambdas/model-trainer/`: `handler.py`, `requirements.txt`, `db.py`
+  - `lambdas/model-invoker/`: `handler.py`, `requirements.txt`, `db.py`
+  - `lambdas/api-handler/`: `handler.py`, `requirements.txt`, `technical.py`, `db.py`
+
+- **Phase 6 (Frontend):**
+  - `frontend/` directory (ready for `npm run build` after `.env.production` is set)
+
+> **Files NOT used in console deployment:** The entire `infra/` directory (CDK TypeScript stacks) and `local-validation/` directory are not needed. They are for CDK-based deployments and local testing respectively.
+
+---
+
 ## Phase 1: Networking & Security Groups
 
 *We configure a fully redundant 2-AZ network with one NAT Gateway and one Elastic IP per AZ, and two separate private route tables — one per AZ — so each AZ's outbound traffic routes through its local NAT.*
@@ -212,27 +237,15 @@ psql -h <YOUR_RDS_ENDPOINT> -U postgres -d pricetracker -f ~/schema.sql
 
 ### 4. Load Historical Price Data (Initial Training Dataset)
 
-Before deploying the Lambdas, seed the database with your 1-month historical OHLC dataset (~8,000 rows collected locally from 13 Apr – 13 May 2026). This gives the `model-trainer` enough data to train immediately on first invocation, rather than waiting 90 days for the `price-fetcher` to accumulate sufficient rows.
+Seed the database with your cleaned `ohlc_seed.csv` (prepared locally before deployment — ~8,000 rows, columns: `metal,open,high,low,close,volume,timestamp`).
 
-> **Data preparation (do this locally before uploading):**
-> 1. Open your exported CSV (`ohlc_prices.csv`) and clean the ~200 problematic rows you identified.
-> 2. Remove the `id`, `currency`, and `created_at` columns — the database auto-generates `id` and `created_at`, and the schema has no `currency` column. Keep only: `metal,open,high,low,close,volume,timestamp`
-> 3. Save the cleaned file as `ohlc_seed.csv` with headers included.
->
-> Your final CSV should look like:
-> ```
-> metal,open,high,low,close,volume,timestamp
-> XAU,4709.9900,4709.9900,4709.9900,4709.9900,0.0000,2026-04-13 12:20:00+00
-> XAG,74.1620,74.1620,74.1620,74.1620,0.0000,2026-04-13 12:20:00+00
-> ```
+**Upload and import via CloudShell:**
 
-**Upload and import the data via CloudShell:**
-
-1. If your CloudShell VPC session from the previous step is still active, continue. Otherwise, re-open CloudShell and re-attach to the VPC (same settings: `price-tracker-vpc`, a private subnet, `lambda-sg`).
+1. If your CloudShell VPC session from the previous step is still active, continue. Otherwise, re-open CloudShell, click **Actions** > **VPC environment settings**, and re-attach using `price-tracker-vpc`, a private subnet, and `lambda-sg`.
 
 2. Click **Actions** > **Upload file** and upload `ohlc_seed.csv`. CloudShell places it in `~/`.
 
-3. Import the CSV into the `ohlc_prices` table using PostgreSQL's `\copy` command:
+3. Open a PostgreSQL session:
 
 ```bash
 psql -h <YOUR_RDS_ENDPOINT> -U postgres -d pricetracker
@@ -241,7 +254,7 @@ psql -h <YOUR_RDS_ENDPOINT> -U postgres -d pricetracker
 4. Paste the database password, then run:
 
 ```sql
-\copy ohlc_prices(metal, open, high, low, close, volume, timestamp) FROM '~/ohlc_seed.csv' WITH (FORMAT csv, HEADER true);
+\copy ohlc_prices(id, metal, open_price, high_price, low_price, close_price, timestamp_utc, created_at) FROM '~/ohlc_seed.csv' WITH (FORMAT csv, HEADER true, DELIMITER ';');
 ```
 
 5. Verify the import:
@@ -254,7 +267,7 @@ You should see approximately 4,000+ rows for XAU and 4,000+ rows for XAG.
 
 6. Type `\q` to exit.
 
-> 💡 **Why this matters:** The `model-trainer` Lambda requires at least 100 rows per metal and uses the last 90 days of data (`WHERE timestamp > NOW() - INTERVAL '90 days'`). Since your data spans 13 Apr – 13 May 2026, you have a 30-day window. Once deployed, the `model-trainer` EventBridge rule fires every Sunday at 02:00 UTC. If your deployment date is within 90 days of May 13, the trainer will find your historical data and train successfully on first run. The `price-fetcher` will then continue appending fresh 5-minute bars going forward.
+> 💡 **Why this matters:** The `model-trainer` Lambda uses the last 90 days of OHLC data and requires at least 100 rows per metal to train. Your seeded data covers 13 Apr – 13 May 2026. As long as your deployment date is within 90 days of 13 May, all seeded rows will be included in training. The `price-fetcher` will append fresh 5-minute bars from deployment onward.
 
 ---
 
@@ -303,22 +316,9 @@ Open the newly created role, click **Add permissions** > **Create inline policy*
 
 Name the policy `pricetracker-inline-policy` and save.
 
-### 2. Package Lambda Functions
+### 2. Upload Lambda Function Zips
 
-Run the following in your terminal for each Lambda function directory (`price-fetcher`, `model-trainer`, `model-invoker`, `api-handler`):
-
-```bash
-mkdir -p build && rsync -a --exclude='build' --exclude='function.zip' . build/
-[ -f requirements.txt ] && pip install -r requirements.txt -t build/
-cd build && zip -r ../function.zip . && cd ..
-rm -rf build
-```
-
-> **Windows users:** Use WSL2, or manually copy files into a staging folder, run `pip install -r requirements.txt -t build\`, and zip the `build\` folder contents.
-
-### 3. Deploy Lambda Functions
-
-Go to **Lambda** > **Create function**. Repeat for all four functions: `price-fetcher`, `model-trainer`, `model-invoker`, `api-handler`.
+Your four `function.zip` files were prepared locally before deployment. Go to **Lambda** > **Create function**. Repeat for all four functions: `price-fetcher`, `model-trainer`, `model-invoker`, `api-handler`.
 
 For each function:
 - **Runtime:** Python 3.12
@@ -440,9 +440,11 @@ Go to **Amazon EventBridge** > **Rules** > **Create rule**.
 **Rule 2 — Model trainer:**
 - **Name:** `trigger-model-train`
 - **Rule type:** Schedule
-- **Schedule:** Cron-based → `0 2 ? * SUN *` *(Sundays at 02:00 UTC)*
+- **Schedule:** Cron-based → `0 6 ? * SUN,TUE,FRI *` *(Sunday, Tuesday, Friday at 06:00 UTC)*
 - **Target:** Lambda function → `model-trainer`
 - Click through to **Create**.
+
+> ⚡ **Manual Trigger (Initial Training):** You do not need to wait for the first scheduled run. After completing this step, go to the **Lambda Console**, open `model-trainer`, click the **Test** tab, leave the default JSON as `{}`, and click **Test**. This immediately trains the model on your seeded historical data. You can repeat this manual test at any time to force a retrain.
 
 > 💡 **Validation:** The AWS console wizard auto-adds the `lambda:InvokeFunction` resource-based policy during rule creation. If a Lambda does not trigger on schedule, verify the policy under Lambda > **Configuration** > **Permissions** > **Resource-based policy statements**.
 
