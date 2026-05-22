@@ -210,6 +210,52 @@ psql -h <YOUR_RDS_ENDPOINT> -U postgres -d pricetracker -f ~/schema.sql
 
 7. Paste the database password when prompted. The schema will execute and return to the terminal prompt automatically. No `\q` is needed.
 
+### 4. Load Historical Price Data (Initial Training Dataset)
+
+Before deploying the Lambdas, seed the database with your 1-month historical OHLC dataset (~8,000 rows collected locally from 13 Apr – 13 May 2026). This gives the `model-trainer` enough data to train immediately on first invocation, rather than waiting 90 days for the `price-fetcher` to accumulate sufficient rows.
+
+> **Data preparation (do this locally before uploading):**
+> 1. Open your exported CSV (`ohlc_prices.csv`) and clean the ~200 problematic rows you identified.
+> 2. Remove the `id`, `currency`, and `created_at` columns — the database auto-generates `id` and `created_at`, and the schema has no `currency` column. Keep only: `metal,open,high,low,close,volume,timestamp`
+> 3. Save the cleaned file as `ohlc_seed.csv` with headers included.
+>
+> Your final CSV should look like:
+> ```
+> metal,open,high,low,close,volume,timestamp
+> XAU,4709.9900,4709.9900,4709.9900,4709.9900,0.0000,2026-04-13 12:20:00+00
+> XAG,74.1620,74.1620,74.1620,74.1620,0.0000,2026-04-13 12:20:00+00
+> ```
+
+**Upload and import the data via CloudShell:**
+
+1. If your CloudShell VPC session from the previous step is still active, continue. Otherwise, re-open CloudShell and re-attach to the VPC (same settings: `price-tracker-vpc`, a private subnet, `lambda-sg`).
+
+2. Click **Actions** > **Upload file** and upload `ohlc_seed.csv`. CloudShell places it in `~/`.
+
+3. Import the CSV into the `ohlc_prices` table using PostgreSQL's `\copy` command:
+
+```bash
+psql -h <YOUR_RDS_ENDPOINT> -U postgres -d pricetracker
+```
+
+4. Paste the database password, then run:
+
+```sql
+\copy ohlc_prices(metal, open, high, low, close, volume, timestamp) FROM '~/ohlc_seed.csv' WITH (FORMAT csv, HEADER true);
+```
+
+5. Verify the import:
+
+```sql
+SELECT metal, COUNT(*) FROM ohlc_prices GROUP BY metal;
+```
+
+You should see approximately 4,000+ rows for XAU and 4,000+ rows for XAG.
+
+6. Type `\q` to exit.
+
+> 💡 **Why this matters:** The `model-trainer` Lambda requires at least 100 rows per metal and uses the last 90 days of data (`WHERE timestamp > NOW() - INTERVAL '90 days'`). Since your data spans 13 Apr – 13 May 2026, you have a 30-day window. Once deployed, the `model-trainer` EventBridge rule fires every Sunday at 02:00 UTC. If your deployment date is within 90 days of May 13, the trainer will find your historical data and train successfully on first run. The `price-fetcher` will then continue appending fresh 5-minute bars going forward.
+
 ---
 
 ## Phase 4: IAM & Serverless Compute
@@ -295,10 +341,10 @@ Go to **Configuration** > **Environment variables** > **Edit**, and add the foll
 
 | Function | Environment variables |
 |---|---|
-| `price-fetcher` | `DB_SECRET_ARN` = *(ARN of pricetracker-db-creds)* <br> `API_SECRET_ARN` = *(ARN of pricetracker-metals-api-key)* <br> `DB_HOST` = *(RDS endpoint)* <br> `DB_NAME` = `pricetracker` <br> *(+ `WS_CONNECTION_URL` — added in Phase 5)* |
+| `price-fetcher` | `DB_SECRET_ARN` = *(ARN of pricetracker-db-creds)* <br> `API_SECRET_ARN` = *(ARN of pricetracker-metals-api-key)* <br> `DB_HOST` = *(RDS endpoint)* <br> `DB_NAME` = `pricetracker` <br> *(+ `WS_ENDPOINT` — added in Phase 5)* |
 | `model-trainer` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_BUCKET` = `pricetracker-models-[account-id]` |
 | `model-invoker` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_BUCKET` = `pricetracker-models-[account-id]` |
-| `api-handler` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_INVOKER_NAME` = `pricetracker-model-invoker` <br> *(+ `WS_CONNECTION_URL` — added in Phase 5)* |
+| `api-handler` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_INVOKER_ARN` = `model-invoker` <br> *(+ `WS_ENDPOINT` — added in Phase 5)* |
 
 ---
 
@@ -324,7 +370,7 @@ Go to **Configuration** > **Environment variables** > **Edit**, and add the foll
 7. Note both the **WebSocket URL** (`wss://...`) and the **Connection URL** (`https://...`).
 
 > ⚠️ **ACTION ITEM:** Go to both `price-fetcher` and `api-handler` Lambda **Environment Variables** and add:
-> `WS_CONNECTION_URL` = *(paste the Connection URL from the WebSocket API)*
+> `WS_ENDPOINT` = *(paste the Connection URL from the WebSocket API)*
 
 > 💡 **Developer note:** Ensure your `api-handler` returns `{"statusCode": 200}` for `$connect` events. API Gateway will reject all WebSocket connections with a 403 if the integration response is missing or malformed.
 

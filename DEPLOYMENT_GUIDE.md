@@ -249,10 +249,10 @@ Go to **Configuration** > **Environment variables** > **Edit**, and add the foll
 
 | Function | Environment variables |
 |---|---|
-| `price-fetcher` | `DB_SECRET_ARN` = *(ARN of pricetracker-db-creds)* <br> `API_SECRET_ARN` = *(ARN of pricetracker-metals-api-key)* <br> `DB_HOST` = *(RDS endpoint)* <br> `DB_NAME` = `pricetracker` <br> *(+ `WS_CONNECTION_URL` — added in Phase 5)* |
+| `price-fetcher` | `DB_SECRET_ARN` = *(ARN of pricetracker-db-creds)* <br> `API_SECRET_ARN` = *(ARN of pricetracker-metals-api-key)* <br> `DB_HOST` = *(RDS endpoint)* <br> `DB_NAME` = `pricetracker` <br> *(+ `WS_ENDPOINT` — added in Phase 5)* |
 | `model-trainer` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_BUCKET` = `pricetracker-models-[account-id]` |
 | `model-invoker` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_BUCKET` = `pricetracker-models-[account-id]` |
-| `api-handler` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_INVOKER_NAME` = `pricetracker-model-invoker` <br> *(+ `WS_CONNECTION_URL` — added in Phase 5)* |
+| `api-handler` | `DB_SECRET_ARN`, `DB_HOST`, `DB_NAME` = `pricetracker`, `MODEL_INVOKER_ARN` = `model-invoker` <br> *(+ `WS_ENDPOINT` — added in Phase 5)* |
 
 ---
 
@@ -278,7 +278,7 @@ Go to **Configuration** > **Environment variables** > **Edit**, and add the foll
 7. Note both the **WebSocket URL** (`wss://...`) and the **Connection URL** (`https://...`).
 
 > ⚠️ **ACTION ITEM:** Go to both `price-fetcher` and `api-handler` Lambda **Environment Variables** and add:
-> `WS_CONNECTION_URL` = *(paste the Connection URL from the WebSocket API)*
+> `WS_ENDPOINT` = *(paste the Connection URL from the WebSocket API)*
 
 > 💡 **Developer note:** Ensure your `api-handler` returns `{"statusCode": 200}` for `$connect` events. API Gateway will reject all WebSocket connections with a 403 if the integration response is missing or malformed.
 
