@@ -41,7 +41,7 @@ export class MlStack extends cdk.Stack {
     };
 
     // ── Lambda: model-invoker (on-demand prediction) ──────────────────────────
-    // Private subnet: only needs RDS (security group) + S3 (Gateway endpoint)
+    // Public subnet: only needs RDS (security group) + S3 (Gateway endpoint)
     // + Secrets Manager (Interface endpoint). No internet access required.
     this.modelInvokerFn = new PythonFunction(this, 'ModelInvokerFn', {
       functionName: 'model-invoker',
@@ -63,7 +63,7 @@ export class MlStack extends cdk.Stack {
     storage.modelBucket.grantRead(this.modelInvokerFn);
 
     // ── Lambda: model-trainer (weekly batch) ──────────────────────────────────
-    // Private subnet: only needs RDS + S3 (Gateway endpoint) + Secrets Manager.
+    // Public subnet: only needs RDS + S3 (Gateway endpoint) + Secrets Manager.
     const modelTrainerFn = new PythonFunction(this, 'ModelTrainerFn', {
       functionName: 'model-trainer',
       layers: [storage.sharedLayer],
