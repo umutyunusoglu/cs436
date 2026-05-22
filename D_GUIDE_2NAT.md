@@ -308,7 +308,7 @@ Open the newly created role, click **Add permissions** > **Create inline policy*
     {
       "Effect": "Allow",
       "Action": "lambda:InvokeFunction",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:pricetracker-model-invoker"
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:model-invoker"
     }
   ]
 }
@@ -335,6 +335,7 @@ Go to **Code** > **Upload from** > **.zip file** → upload the appropriate `fun
 Go to **Configuration** > **General configuration** > **Edit**:
 - **Memory:** `512 MB` *(prevents OOM errors on ML inference; safe baseline for all functions)*
 - **Timeout:** `60 seconds` *(covers cold starts, Tiingo API latency, and ML inference time)*
+- **IMPORTANT:** Set `10 minutes` for model-trainer.
 
 **Set environment variables:**
 Go to **Configuration** > **Environment variables** > **Edit**, and add the following per function:
