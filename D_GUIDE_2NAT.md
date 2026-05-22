@@ -377,16 +377,19 @@ Go to **Configuration** > **Environment variables** > **Edit**, and add the foll
 
 ---
 
-## Phase 6: Frontend Deployment & CloudFront OAC
+## Phase 6: Frontend Deployment & CloudFront Routing
 
 > 🛑 **STOP — do not run `npm run build` yet.**
 >
-> Open `frontend/.env.production` and set:
+> Open `frontend/.env.production` and set ONLY the WebSocket URL:
+>
+> ```env
+> VITE_WS_URL=<WebSocket Phase 5 URL>
 > ```
-> VITE_API_URL=<HTTP API Invoke URL from Phase 5>
-> VITE_WS_URL=<WebSocket URL from Phase 5>
-> ```
-> If you build before doing this, the API URLs will be baked in as empty strings and the frontend will be permanently disconnected from the backend. You would need to rebuild and re-upload.
+>
+> **Note:** The REST API URL is intentionally omitted because the React app is configured to use relative `/api/*` paths, which CloudFront will intercept and route.
+
+---
 
 ### 1. Build and Upload Frontend
 
@@ -396,36 +399,135 @@ npm install
 npm run build
 ```
 
-Go to **S3** > `pricetracker-web-[account-id]` > **Upload** → upload all contents of the `dist/` folder.
+Go to:
 
-### 2. Create CloudFront Distribution
+**S3 → `pricetracker-web-[account-id]` → Upload**
 
-1. Go to **CloudFront** > **Create Distribution**.
-2. **Origin domain:** Select `pricetracker-web-[account-id]` from the S3 dropdown.
-3. **Origin access:** Select **Origin access control settings (recommended)**. Click **Create control setting** and accept defaults.
+Upload **all contents** of the `dist/` folder.
+
+---
+
+### 2. Create the URI Rewrite Function
+
+Before creating the distribution, create a CloudFront Function to strip the `/api` prefix so API Gateway can correctly process requests.
+
+Navigate to:
+
+**CloudFront → Functions → Create function**
+
+Use the following settings:
+
+- **Name:** `price-tracker-api-rewrite`
+
+Click **Create function**.
+
+Paste the following into the code editor:
+
+```javascript
+function handler(event) {
+    var request = event.request;
+    request.uri = request.uri.replace(/^\/api/, '') || '/';
+    return request;
+}
+```
+
+Then:
+
+1. Click **Save changes**
+2. Open the **Publish** tab
+3. Click **Publish function**
+
+---
+
+### 3. Create CloudFront Distribution (S3 Origin)
+
+1. Go to **CloudFront → Create Distribution**
+2. **Origin domain:** Select `pricetracker-web-[account-id]` from the S3 dropdown
+3. **Origin access:** Select **Origin access control settings (recommended)**
+   - Click **Create control setting**
+   - Accept defaults
 4. **Viewer protocol policy:** `Redirect HTTP to HTTPS`
 5. **Default root object:** `index.html`
-6. Click **Create distribution**.
-7. A yellow banner will appear — click **Copy policy**, then navigate to your S3 web bucket > **Permissions** > **Bucket policy** > **Edit**, paste the policy, and save. This locks the bucket so only CloudFront can read it.
+6. Click **Create distribution**
+7. A yellow banner will appear:
+   - Click **Copy policy**
+   - Navigate to:
+     - **S3 → Your web bucket → Permissions → Bucket policy → Edit**
+   - Paste the policy and save
 
-### 3. Fix SPA Deep-Link Routing
+---
 
-Without this step, refreshing the browser on any route other than `/` (e.g. `/predict`) will return a CloudFront 403 error instead of the React app.
+### 4. Add the API Gateway Origin
 
-While the distribution is deploying, go to the **Error pages** tab and click **Create custom error response**:
+While the distribution is deploying:
+
+1. Open your new CloudFront Distribution
+2. Go to the **Origins** tab
+3. Click **Create origin**
+4. **Origin domain:** Paste your HTTP API Gateway **Invoke URL** from Phase 5
+   - Remove:
+     - the `https://` prefix
+     - any trailing slashes
+   - Example:
+
+```text
+abc123def.execute-api.eu-west-1.amazonaws.com
+```
+
+5. **Protocol:** `HTTPS only`
+6. Click **Create origin**
+
+---
+
+### 5. Create the `/api/*` Cache Behavior
+
+1. Go to the **Behaviors** tab
+2. Click **Create behavior**
+
+Configure the following:
+
+| Setting | Value |
+|---|---|
+| Path pattern | `/api/*` |
+| Origin and origin groups | Your API Gateway origin |
+| Viewer protocol policy | `Redirect HTTP to HTTPS` |
+| Allowed HTTP methods | `GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE` |
+
+### Cache key and origin requests
+
+| Setting | Value |
+|---|---|
+| Cache policy | `CachingDisabled` |
+| Origin request policy | `AllViewerExceptHostHeader` |
+
+### Function associations
+
+| Event Type | Function |
+|---|---|
+| Viewer request | `price-tracker-api-rewrite` |
+
+Then click **Create behavior**.
+
+---
+
+### 6. Fix SPA Deep-Link Routing
+
+Go to the **Error pages** tab and click **Create custom error response**.
+
+Use the following settings:
 
 | Field | Value |
 |---|---|
 | HTTP error code | `403: Forbidden` |
-| Customize error response | Yes |
+| Customize error response | `Yes` |
 | Response page path | `/index.html` |
 | HTTP response code | `200: OK` |
 
 Save changes.
 
-> ⏳ **CloudFront propagation:** The distribution will show status **Deploying** for 10–20 minutes. During this time the URL will return errors. Wait until the status changes to **Enabled** before testing.
-
 ---
+
+> ⏳ **CloudFront propagation:** Wait until the distribution status changes to **Enabled** (approximately 10–20 minutes) before testing your domain.
 
 ## Phase 7: Automation (EventBridge)
 
