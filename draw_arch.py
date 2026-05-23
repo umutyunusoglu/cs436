@@ -54,7 +54,7 @@ dot.node("tiingo",  **nd("Tiingo API\n(XAU / XAG)", C["ext"], shape="ellipse", w
 dot.node("ws_api",   **nd("WebSocket\nAPI Gateway", C["apigw"]))
 dot.node("rest_api", **nd("REST\nAPI Gateway", C["apigw"]))
 dot.node("eb_fetch", **nd("EventBridge\nevery 5 min", C["eb"]))
-dot.node("eb_train", **nd("EventBridge\nSunday 03:00 UTC", C["eb"]))
+dot.node("eb_train", **nd("EventBridge\nSun, Tue, Fri 06:00", C["eb"]))
 
 # ── Shared storage + secrets (outside VPC) ─────────────────────────────────
 dot.node("m_bucket", **nd("S3  model-artifacts", C["s3"]))
@@ -81,18 +81,18 @@ with dot.subgraph(name="cluster_vpc") as vpc:
         fontname="Helvetica Bold", fontsize="12", fontcolor=C["border"],
     )
 
-    # Public subnet ────────────────────────────────────────────────────────────
-    with vpc.subgraph(name="cluster_public") as pub:
-        pub.attr(
-            label="🌐  Public Subnets\n(internet-routable via IGW)",
+    # Private subnet (NAT) ─────────────────────────────────────────────────────
+    with vpc.subgraph(name="cluster_private_nat") as priv_nat:
+        priv_nat.attr(
+            label="🔒  Private Subnets\n(internet-routable via NAT Gateway)",
             style="filled", fillcolor="#EBF5FF",
             color="#0972D3", penwidth="2",
             fontname="Helvetica", fontsize="11", fontcolor="#0972D3",
         )
-        pub.node("api_handler", **nd("api-handler λ\n256 MB · 15 s", C["lambda"]))
-        pub.node("pf",          **nd("price-fetcher λ\n256 MB · 30 s", C["lambda"]))
-        pub.node("invoker",     **nd("model-invoker λ\n256 MB · 30 s", C["lambda"]))
-        pub.node("trainer",     **nd("model-trainer λ\n512 MB · 10 min", C["lambda"]))
+        priv_nat.node("api_handler", **nd("api-handler λ\n512 MB · 60 s", C["lambda"]))
+        priv_nat.node("pf",          **nd("price-fetcher λ\n512 MB · 60 s", C["lambda"]))
+        priv_nat.node("invoker",     **nd("model-invoker λ\n512 MB · 60 s", C["lambda"]))
+        priv_nat.node("trainer",     **nd("model-trainer λ\n512 MB · 10 min", C["lambda"]))
 
     # Private isolated subnet ──────────────────────────────────────────────────
     with vpc.subgraph(name="cluster_private") as priv:
@@ -104,15 +104,7 @@ with dot.subgraph(name="cluster_vpc") as vpc:
         )
         priv.node("rds", **nd("RDS PostgreSQL\nt3.micro", C["rds"]))
 
-    # VPC Endpoints ────────────────────────────────────────────────────────────
-    with vpc.subgraph(name="cluster_ep") as ep:
-        ep.attr(
-            label="VPC Endpoints",
-            style="filled", fillcolor="#FFF0FE",
-            color="#7c3aed", penwidth="1.5",
-            fontname="Helvetica", fontsize="10", fontcolor="#7c3aed",
-        )
-        ep.node("s3_gw", **nd("S3 Gateway endpoint\n(free)", C["s3"]))
+    
 
 # ── Monitoring cluster ────────────────────────────────────────────────────────
 with dot.subgraph(name="cluster_mon") as mon:
@@ -157,12 +149,9 @@ dot.edge("invoker",  "m_bucket",  **E)
 dot.edge("trainer",  "rds",       **E)
 dot.edge("trainer",  "m_bucket",  **E)
 
-# S3 VPC Endpoint routing
-for src in ["invoker", "trainer"]:
-    dot.edge(src, "s3_gw", **EP)
-dot.edge("s3_gw", "m_bucket", **EP)
 
-# Secrets Manager routing (direct from Lambdas via IGW)
+
+# Secrets Manager routing (from Lambdas via NAT Gateway)
 for src in ["pf", "api_handler", "invoker", "trainer"]:
     dot.edge(src, "sm_rds", **EP)
 dot.edge("pf", "sm_api", **EP)

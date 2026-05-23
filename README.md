@@ -10,7 +10,7 @@ Tiingo API
     ▼ (every 5 min)
 EventBridge Scheduler ──► Lambda: price-fetcher ──► RDS PostgreSQL (t3.micro)
                                                            │
-                     EventBridge (weekly) ──► Lambda: model-trainer ──► S3: model-artifacts
+                     EventBridge (3x/week) ──► Lambda: model-trainer ──► S3: model-artifacts
                                                            │
                           Browser ──► CloudFront ──► S3: static-web (React SPA)
                                            │
@@ -39,12 +39,28 @@ EventBridge Scheduler ──► Lambda: price-fetcher ──► RDS PostgreSQL (
 cs436/
 ├── infra/            # AWS CDK TypeScript — all infrastructure as code
 ├── lambdas/          # Python Lambda functions
-│   ├── shared-layer/ # AWS Lambda Layer (psycopg2, boto3, db helper)
-│   ├── price-fetcher/
-│   ├── model-trainer/
-│   ├── model-invoker/
-│   └── api-handler/
+│   ├── price-fetcher/ # (handler.py, requirements.txt, db.py)
+│   ├── model-trainer/ # (handler.py, requirements.txt, db.py)
+│   ├── model-invoker/ # (handler.py, requirements.txt, db.py)
+│   └── api-handler/   # (handler.py, requirements.txt, technical.py, db.py)
 └── frontend/         # React + Vite SPA
+```
+
+- Note that the lambda folders in the repository aren't to be directly zipped.
+- First, all of the dependencies for each lambda should be pip installed in the relevant lambda's folder on your local, and they should be Linux versions. As shared-layer is now unused due to db.py being back to every lambda folder, `psycopg2` needs to be additionally installed in the lambda folders.
+- After dependencies are installed, the folders need to be zipped without bloat. I used this script inside the relevant Lambda folder for that purpose:
+
+```bash
+zip -r ../<LAMBDA_NAME>.zip . -x "venv/*" -x "requirements.txt" -x "*.zip"
+```
+
+- After the zip has been created, it is ready to be installed to the models S3 bucket and then copied into the relevant Lambda functions as code via the CloudShell command in AWS Console:
+
+```bash
+aws lambda update-function-code \
+  --function-name <LAMBDA_NAME> \
+  --s3-bucket pricetracker-models-347116125492 \
+  --s3-key lambdazips/<LAMBDA_NAME>.zip
 ```
 
 ## Local Testing
@@ -161,19 +177,20 @@ cdk deploy FrontendStack MonitoringStack
 | GET | `/technical?metal=silver` | RSI + MACD indicators |
 | WS | `wss://<ws-url>` | Real-time price stream (ping every 4 min) |
 
-## Free Tier Usage
+## Cloud Resource Usage & Costs
 
-| Service | Limit | This App |
+| Service | Limit / Cost | This App |
 |---------|-------|----------|
-| Lambda | 1M req/month | ~9K req/month |
-| RDS t3.micro | 750 hrs/month | 744 hrs/month |
-| S3 | 5 GB | < 100 MB |
-| API Gateway | 1M calls/month | Low traffic |
-| CloudFront | 1 TB transfer | SPA traffic |
+| **NAT Gateway** | **~$110.00 / month** | **2 active gateways (Multi-AZ)** |
+| Lambda | 1M req/month (Free) | ~9K req/month |
+| RDS t3.micro | 750 hrs/month (Free) | 744 hrs/month |
+| S3 | 5 GB (Free) | < 100 MB |
+| API Gateway | 1M calls/month (Free) | Low traffic |
 
-> **Note:** AWS Secrets Manager costs $0.40/secret/month after the 30-day trial.
+> **CRITICAL COST WARNING:** This architecture places Lambdas in private subnets with a NAT Gateway. **NAT Gateways are not covered by the AWS Free Tier and generate ~3.67 USD/day in charges.** Ensure you execute the teardown sequence immediately after project validation to avoid excess billing.
+>
+> **Note:** AWS Secrets Manager costs $0.40/secret/month. RDS t3.micro converts to standard hourly billing 12 months after AWS account creation.
 
-> **Note:** RDS t3.micro converts to standard hourly billing exactly 12 months after AWS account creation.
 
 ## Local Development
 
