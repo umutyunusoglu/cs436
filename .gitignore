@@ -29,6 +29,7 @@ env/
 .env.*.local
 *.secret
 .secrets/
+frontend/.env.production
 
 # CDK
 cdk.context.json

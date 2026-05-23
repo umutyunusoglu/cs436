@@ -120,6 +120,10 @@ def lambda_handler(event, context):
         conn = get_connection()
         X = _get_features(conn, metal, feature_cols)
 
+        # Cast PostgreSQL Decimal objects to float to prevent np.isnan crashes
+        import numpy as np
+        X = np.array(X, dtype=float)
+
         if np.isnan(X).any():
             return {
                 "statusCode": 503,

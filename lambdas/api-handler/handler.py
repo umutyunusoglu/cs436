@@ -206,16 +206,21 @@ def lambda_handler(event, context):
     request_context = event.get("requestContext", {})
     route_key = request_context.get("routeKey")
     
-    # WebSocket routing
-    if route_key == "$connect":
-        return handle_ws_connect(request_context["connectionId"])
-    if route_key == "$disconnect":
-        return handle_ws_disconnect(request_context["connectionId"])
-    # Route custom ping messages or default fallbacks to update liveness
-    if route_key == "ping" or route_key == "$default":
-        return handle_ws_ping(request_context["connectionId"])
+    # 1. WebSocket routing (Isolated by checking for connectionId)
+    if "connectionId" in request_context:
+        connection_id = request_context["connectionId"]
+        
+        if route_key == "$connect":
+            return handle_ws_connect(connection_id)
+        if route_key == "$disconnect":
+            return handle_ws_disconnect(connection_id)
+        # Route custom ping messages or default WS fallbacks
+        if route_key == "ping" or route_key == "$default":
+            return handle_ws_ping(connection_id)
+            
+        return {"statusCode": 200, "body": "Connected"}
 
-    # REST events
+    # 2. REST events (HTTP traffic)
     path = event.get("path", "") or event.get("rawPath", "")
     params = event.get("queryStringParameters") or {}
 

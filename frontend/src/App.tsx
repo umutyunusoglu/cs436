@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import type { Metal, RangeOption, OHLCBar } from './types';
+import { useState, useCallback, useEffect } from 'react';
+import type { Metal, RangeOption, OHLCBar, RSIPoint, MACDPoint } from './types';
 import { MetalSelector } from './components/MetalSelector';
 import { PriceHeader } from './components/PriceHeader';
 import { PriceChart } from './components/PriceChart';
@@ -8,19 +8,21 @@ import { PredictionBadge } from './components/PredictionBadge';
 import { usePrices } from './hooks/usePrices';
 import { usePrediction } from './hooks/usePrediction';
 import { useWebSocket } from './hooks/useWebSocket';
-import type { WsStatus } from './hooks/useWebSocket';
+// 1. IMPORT THE CORRECT TYPE NAME
+import type { ConnectionStatus } from './hooks/useWebSocket';
 import { fetchTechnical } from './api/client';
-import { useEffect } from 'react';
-import type { RSIPoint, MACDPoint } from './types';
 
 // ── WebSocket status indicator ────────────────────────────────────────────────
-const WS_STATUS_CONFIG: Record<WsStatus, { color: string; label: string }> = {
+// 2. USE ConnectionStatus AND ADD THE MISSING 'error' STATE
+const WS_STATUS_CONFIG: Record<ConnectionStatus, { color: string; label: string }> = {
   connected:    { color: '#22c55e', label: 'Live' },
   connecting:   { color: '#f59e0b', label: 'Connecting…' },
   disconnected: { color: '#ef4444', label: 'Reconnecting…' },
+  error:        { color: '#ef4444', label: 'Error' }, 
 };
 
-function WsStatusBadge({ status }: { status: WsStatus }) {
+// 3. UPDATE THE PROP TYPE TO ConnectionStatus
+function WsStatusBadge({ status }: { status: ConnectionStatus }) {
   const { color, label } = WS_STATUS_CONFIG[status];
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#94a3b8' }}>
