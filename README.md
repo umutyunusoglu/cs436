@@ -2,6 +2,8 @@
 
 A full-stack AWS application that tracks XAU/XAG spot prices in near real-time, displays interactive candlestick charts with RSI/MACD technical indicators, and provides ML-based price direction predictions.
 
+**The CloudFront hosted website is currently available in:** https://d32wagxox6ipgg.cloudfront.net/
+
 ## Architecture
 
 ```text
